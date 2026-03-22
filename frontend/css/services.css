@@ -1,0 +1,37 @@
+/* ── SERVICES PAGE ──────────────────────────────────── */
+
+.service-card {
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--radius-lg); padding:32px;
+  height:100%; display:flex; flex-direction:column;
+  transition:all var(--t); position:relative; overflow:hidden;
+}
+.service-card::after {
+  content:''; position:absolute;
+  top:0; left:0; right:0; height:2px;
+  background:linear-gradient(90deg,var(--cyan),#0088ff);
+  opacity:0; transition:opacity var(--t);
+}
+.service-card:hover { border-color:var(--border-glow); transform:translateY(-4px); box-shadow:var(--shadow-c); }
+.service-card:hover::after { opacity:1; }
+.service-icon {
+  width:56px; height:56px; border-radius:14px;
+  display:flex; align-items:center; justify-content:center;
+  font-size:1.5rem; margin-bottom:20px;
+}
+.service-card h4 { font-size:1.05rem; font-weight:700; margin-bottom:12px; }
+.service-card p  { font-size:.875rem; color:var(--text-dim); line-height:1.75; flex:1; margin-bottom:20px; }
+.service-features { list-style:none; display:flex; flex-direction:column; gap:8px; margin-top:auto; }
+.service-features li {
+  display:flex; align-items:center; gap:8px;
+  font-size:.82rem; color:var(--text-dim);
+}
+.service-features li i { color:var(--green); font-size:.8rem; }
+
+.pricing-strip {
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--radius-lg); padding:40px;
+  margin-top:60px; text-align:center;
+}
+.pricing-strip h3 { font-size:1.5rem; margin-bottom:10px; }
+.pricing-strip p  { color:var(--text-dim); margin-bottom:24px; }

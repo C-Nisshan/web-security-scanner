@@ -1,0 +1,32 @@
+/* ── ABOUT PAGE ─────────────────────────────────────── */
+
+.about-intro { padding:90px 0; }
+.mission-block {
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--radius-lg); padding:36px;
+}
+.mission-block h3 { font-size:1.3rem; margin-bottom:14px; }
+.mission-block p  { color:var(--text-dim); line-height:1.85; margin-bottom:14px; }
+.mission-block p:last-child { margin-bottom:0; }
+
+.value-card {
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--radius-lg); padding:26px;
+  height:100%; transition:all var(--t);
+}
+.value-card:hover { border-color:var(--border-glow); box-shadow:var(--shadow-c); transform:translateY(-3px); }
+.value-icon {
+  width:46px; height:46px; border-radius:12px;
+  display:flex; align-items:center; justify-content:center;
+  font-size:1.3rem; margin-bottom:16px;
+}
+.value-card h5 { font-size:.95rem; font-weight:700; margin-bottom:8px; }
+.value-card p  { font-size:.83rem; color:var(--text-dim); line-height:1.7; margin:0; }
+
+.team-stat {
+  text-align:center;
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--radius-lg); padding:30px 20px;
+}
+.team-stat-val { font-size:2.4rem; font-weight:900; color:var(--cyan); display:block; line-height:1; margin-bottom:8px; }
+.team-stat-label { font-size:.8rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:.06em; }
