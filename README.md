@@ -75,15 +75,12 @@ Injects SQL Injection and XSS payloads into URL query parameters. Analyses HTTP 
 ---
 
 ## Prerequisites
-
-| Requirement | Version | Check |
-|---|---|---|
-| Python 3 | 3.8+ | `python3 --version` |
-| VS Code |
+Python 3.8+  `python3 --version` |
+VS Code 
 
 ---
 
-## Setup (WSL Ubuntu terminal in VS Code)
+## Setup (terminal in VS Code)
 
 Open the project in VS Code then open the terminal.
 
