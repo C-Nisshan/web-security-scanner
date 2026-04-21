@@ -46,14 +46,14 @@
         </div>
         <h1 class="sec-title">Security Assessment <span class="hi">Console</span></h1>
         <p class="sec-lead" style="max-width:none">
-          Enter a target URL to map the application's structure, then probe discovered endpoints for injection vulnerabilities.
+          Discover, probe, and analyse your web application's security posture — then download a full PDF report.
         </p>
       </div>
       <div class="col-lg-4 text-lg-end">
         <div class="d-flex gap-2 justify-content-lg-end flex-wrap">
           <span class="cyber-badge green"><i class="bi bi-circle-fill me-1" style="font-size:7px"></i>Discovery Active</span>
           <span class="cyber-badge green"><i class="bi bi-circle-fill me-1" style="font-size:7px"></i>Injection Active</span>
-          <span class="cyber-badge" style="opacity:.45"><i class="bi bi-circle me-1" style="font-size:7px"></i>Analyzer Soon</span>
+          <span class="cyber-badge green"><i class="bi bi-circle-fill me-1" style="font-size:7px"></i>Full Scan Active</span>
         </div>
       </div>
     </div>
@@ -78,13 +78,16 @@
           </div>
           <div class="panel-body">
 
-            <!-- Module tabs -->
-            <div class="scanner-tabs" id="moduleTabs">
+            <!-- Module tabs — now 3 -->
+            <div class="scanner-tabs" id="moduleTabs" style="grid-template-columns:1fr 1fr 1fr">
               <button class="tab-btn active" onclick="switchTab('crawl')">
                 <i class="bi bi-diagram-3"></i> Discovery
               </button>
               <button class="tab-btn" onclick="switchTab('payload')">
                 <i class="bi bi-lightning-charge-fill"></i> Injection
+              </button>
+              <button class="tab-btn" onclick="switchTab('full')">
+                <i class="bi bi-shield-check"></i> Full Scan
               </button>
             </div>
 
@@ -92,8 +95,7 @@
             <div id="crawl-config">
               <div class="mb-3">
                 <label class="cyber-label">Target URL</label>
-                <input type="url" id="crawl-url" class="cyber-input"
-                  placeholder="https://example.com"/>
+                <input type="url" id="crawl-url" class="cyber-input" placeholder="https://example.com"/>
               </div>
               <div class="row g-2 mb-3">
                 <div class="col-6">
@@ -114,8 +116,7 @@
             <div id="payload-config" class="hidden">
               <div class="mb-3">
                 <label class="cyber-label">Target URL</label>
-                <input type="url" id="payload-url" class="cyber-input"
-                  placeholder="https://example.com/page?id=1"/>
+                <input type="url" id="payload-url" class="cyber-input" placeholder="https://example.com/page?id=1"/>
                 <div style="font-size:.7rem;color:var(--text-muted);font-family:var(--font-mono);margin-top:5px">
                   Include a query parameter, e.g. ?id=1
                 </div>
@@ -141,13 +142,56 @@
               </div>
             </div>
 
+            <!-- ── Full Scan config ─────────────────── -->
+            <div id="full-config" class="hidden">
+              <div class="mb-3">
+                <label class="cyber-label">Target URL</label>
+                <input type="url" id="full-url" class="cyber-input" placeholder="https://example.com"/>
+              </div>
+              <div class="row g-2 mb-3">
+                <div class="col-6">
+                  <label class="cyber-label">Crawl Depth</label>
+                  <input type="number" id="full-depth" class="cyber-input" value="2" min="1" max="5"/>
+                </div>
+                <div class="col-6">
+                  <label class="cyber-label">Max Pages</label>
+                  <input type="number" id="full-maxurls" class="cyber-input" value="40" min="5" max="200"/>
+                </div>
+              </div>
+              <div class="row g-2 mb-3">
+                <div class="col-6">
+                  <label class="cyber-label">Test Targets</label>
+                  <input type="number" id="full-targets" class="cyber-input" value="10" min="1" max="50"/>
+                </div>
+                <div class="col-6">
+                  <label class="cyber-label">Profile</label>
+                  <select id="full-payload-type" class="cyber-input cyber-select">
+                    <option value="both">SQLi + XSS</option>
+                    <option value="sqli">SQLi Only</option>
+                    <option value="xss">XSS Only</option>
+                  </select>
+                </div>
+              </div>
+              <button class="btn-cyber" id="full-btn" onclick="startFullScan()"
+                style="background:linear-gradient(135deg,#8b5cf6,#6366f1)">
+                <i class="bi bi-shield-check"></i> Run Full Scan
+              </button>
+              <div class="warn-box mt-3">
+                <i class="bi bi-shield-exclamation me-1"></i>
+                Full scans may take several minutes. Only test applications
+                you own or have written authorisation to test.
+              </div>
+            </div>
+
           </div>
         </div>
 
         <!-- Tip card shown after crawl -->
         <div id="crawl-tip" class="tip-card hidden">
           <p><i class="bi bi-lightbulb-fill me-2" style="color:var(--cyan)"></i>
-            Discovery complete. Switch to <strong style="color:#fff">Injection</strong> to probe for vulnerabilities.</p>
+            Discovery complete. Switch to <strong style="color:#fff">Injection</strong> to probe
+            individual URLs, or <strong style="color:#fff">Full Scan</strong> for a complete
+            automated assessment with a downloadable report.</p>
         </div>
       </div>
 
@@ -172,6 +216,23 @@
 
             <!-- Status bar -->
             <div id="status-bar" class="status-bar hidden mb-4"></div>
+
+            <!-- Report download bar -->
+            <div id="report-bar" class="hidden mb-4" style="
+              display:flex;align-items:center;gap:10px;padding:12px 16px;
+              background:var(--surface);border:1px solid var(--border);
+              border-radius:9px;flex-wrap:wrap">
+              <span style="font-size:.82rem;color:var(--text-dim);flex:1">
+                <i class="bi bi-file-earmark-text-fill me-2" style="color:var(--cyan)"></i>
+                Report ready — download below
+              </span>
+              <button id="dl-html" class="btn-cyber" style="width:auto;padding:7px 16px;font-size:.8rem">
+                <i class="bi bi-filetype-html"></i> HTML Report
+              </button>
+              <button id="dl-pdf" class="btn-cyber green" style="width:auto;padding:7px 16px;font-size:.8rem">
+                <i class="bi bi-file-pdf-fill"></i> PDF Report
+              </button>
+            </div>
 
             <!-- Discovery results -->
             <div id="crawl-results" class="hidden">
@@ -198,6 +259,39 @@
                 <span class="cyber-badge yellow" id="payload-count"></span>
               </div>
               <div id="payload-list" style="max-height:420px;overflow-y:auto"></div>
+            </div>
+
+            <!-- Full Scan results -->
+            <div id="full-results" class="hidden">
+              <div class="stats-grid" id="full-stats"></div>
+
+              <div id="full-risk-badge" class="mb-4"></div>
+
+              <!-- Clean message -->
+              <div id="full-clean-msg" class="hidden" style="text-align:center;padding:40px 20px">
+                <div style="font-size:2.5rem;color:var(--green);margin-bottom:12px">✅</div>
+                <p style="font-size:.9rem;color:var(--text-dim)">
+                  No vulnerabilities detected in this scan pass. Continue regular assessments
+                  as part of your security programme.
+                </p>
+              </div>
+
+              <!-- Findings section -->
+              <div id="full-findings-section">
+                <div class="result-header mb-3">
+                  <h6>Confirmed Findings</h6>
+                  <span class="cyber-badge red" id="full-findings-count"></span>
+                </div>
+                <div id="full-findings-tbody" style="max-height:380px;overflow-y:auto"></div>
+              </div>
+
+              <!-- Recommendations -->
+              <div style="margin-top:24px">
+                <div class="result-header mb-2">
+                  <h6>Recommendations</h6>
+                </div>
+                <ul id="full-recs-list" style="list-style:none;padding:0"></ul>
+              </div>
             </div>
 
           </div>

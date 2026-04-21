@@ -1,147 +1,459 @@
-# Aegis Security Platform
+# Aegis Security — Automated Web Application Security Scanner
 
-Web application security assessment platform with automated surface discovery and injection testing.
+A Python-based tool that automatically crawls a web application, discovers input points,
+tests for common vulnerabilities (SQLi and XSS), and produces a professional HTML/PDF
+report with severity ratings and remediation guidance.
 
 ---
 
-## Folder Structure
+## Table of Contents
+
+- [Features](#features)
+- [Architecture](#architecture)
+- [Project Structure](#project-structure)
+- [Installation](#installation)
+- [Running the Application](#running-the-application)
+- [API Reference](#api-reference)
+- [Module Documentation](#module-documentation)
+- [Testing](#testing)
+- [Ethics & Responsible Use](#ethics--responsible-use)
+- [Roadmap](#roadmap)
+
+---
+
+## Features
+
+| Module | Description |
+|--------|-------------|
+| **Surface Discovery** | Breadth-first crawler maps all reachable pages up to a configurable depth |
+| **SQL Injection** | Error-based, boolean-based, and time-based detection |
+| **XSS Detection** | Reflected XSS with context analysis (HTML body, attribute, script) |
+| **Response Analysis** | Aggregates findings, assigns CVSS-inspired severity scores |
+| **HTML Report** | Standalone, self-contained dark-themed report |
+| **PDF Report** | Professional PDF via ReportLab with cover page, findings, and remediation |
+| **REST API** | Flask backend with separate endpoints for each module |
+| **Web UI** | Full assessment console with Discovery, Injection, and Full Scan tabs |
+
+---
+
+## Architecture
 
 ```
-web-security-scanner/
+User (Browser) ──► Frontend (HTML/CSS/JS)
+                        │
+                        ▼ REST API calls
+                   Flask app.py
+                        │
+          ┌─────────────┼─────────────┐
+          ▼             ▼             ▼
+      Crawler    PayloadEngine   ScannerController
+                                      │
+                          ┌───────────┼───────────┐
+                          ▼           ▼           ▼
+                    SQLiDetector  XSSDetector   (future)
+                          │           │
+                          └─────┬─────┘
+                                ▼
+                        ResponseAnalyzer
+                                │
+                                ▼
+                        ReportGenerator
+                         (HTML + PDF)
+```
+
+### High-Level Flow
+
+```
+User supplies URL
+      │
+      ▼
+[Stage 1] Crawler enumerates pages (BFS)
+      │
+      ▼
+[Stage 2] GET parameters extracted from each discovered URL
+      │
+      ▼
+[Stage 3] SQLiDetector + XSSDetector inject payloads per param
+      │
+      ▼
+[Stage 4] ResponseAnalyzer aggregates & ranks findings
+      │
+      ▼
+[Stage 5] ReportGenerator produces HTML + PDF report
+      │
+      ▼
+User downloads report
+```
+
+---
+
+## Project Structure
+
+```
+aegis/
+├── app.py                    # Flask REST API server
+├── requirements.txt          # Python dependencies
+├── README.md
 │
-├── frontend/
-│   ├── index.html               ← Home page
-│   ├── about.html               ← About page
-│   ├── services.html            ← Services page
-│   ├── contact.html             ← Contact page
-│   ├── scanner.html             ← Assessment console
-│   │
-│   ├── css/
-│   │   ├── global.css           ← Shared: variables, navbar, footer, utilities
-│   │   ├── index.css            ← Home page styles
-│   │   ├── scanner.css          ← Scanner console styles
-│   │   ├── about.css            ← About page styles
-│   │   ├── services.css         ← Services page styles
-│   │   └── contact.css          ← Contact page styles
-│   │
-│   └── js/
-│       ├── global.js            ← Shared: navbar scroll, active link
-│       ├── index.js             ← Home page logic
-│       ├── scanner.js           ← Assessment console (crawl + inject)
-│       ├── about.js             ← About page logic
-│       ├── services.js          ← Services page logic
-│       └── contact.js           ← Contact form handler
+├── scanner/
+│   ├── __init__.py           # Package exports
+│   ├── crawler.py            # BFS web crawler (Stage 1)
+│   ├── payload_engine.py     # Raw payload injection (Stage 3 – simple)
+│   ├── sqli_detector.py      # Advanced SQLi detection (Stage 3)
+│   ├── xss_detector.py       # Advanced XSS detection (Stage 3)
+│   ├── response_analyzer.py  # Finding aggregation & enrichment (Stage 4)
+│   ├── report_generator.py   # HTML + PDF report generation (Stage 5)
+│   └── controller.py         # Full pipeline orchestrator
 │
-└── backend/
-    ├── app.py                   ← Flask REST API (entry point)
-    ├── requirements.txt
-    ├── reports/                 ← Generated reports (runtime)
-    └── scanner/
-        ├── __init__.py
-        ├── crawler.py           ← Surface Discovery Module
-        ├── payload_engine.py    ← Injection Assessment Module
-        ├── controller.py        ← Orchestrator (stub)
-        ├── response_analyzer.py ← Response parser (stub)
-        ├── report_generator.py  ← Report output (stub)
-        └── detectors/
-            ├── __init__.py
-            ├── sqli_detector.py ← SQLi classifier (stub)
-            └── xss_detector.py  ← XSS classifier (stub)
+├── reports/                  # Generated reports (auto-created)
+│
+└── frontend/
+    ├── index.html
+    ├── about.html
+    ├── services.html
+    ├── contact.html
+    ├── scanner.html           # Main assessment console (updated)
+    ├── css/
+    │   ├── global.css
+    │   ├── index.css
+    │   ├── scanner.css
+    │   ├── about.css
+    │   ├── contact.css
+    │   └── services.css
+    └── js/
+        ├── global.js
+        ├── index.js
+        ├── scanner.js         # Console controller (updated)
+        ├── contact.js
+        └── services.js
 ```
 
 ---
 
-## Implemented Modules
+## Installation
 
-### Surface Discovery — `crawler.py`
+### Prerequisites
 
-Breadth-first crawl of a target web application. Discovers all internal pages and links reachable from a seed URL.
+- Python 3.10+
+- pip
 
-**API:** `POST /api/scan/crawl`
-```json
-{ "target_url": "https://example.com", "max_depth": 2, "max_urls": 40 }
-```
-
-### Injection Assessment — `payload_engine.py`
-
-Injects SQL Injection and XSS payloads into URL query parameters. Analyses HTTP responses for vulnerability signatures.
-
-**API:** `POST /api/scan/payload`
-```json
-{ "target_url": "https://example.com/page?id=1", "payload_type": "both", "max_payloads": 20 }
-```
-`payload_type` accepts: `"sqli"` | `"xss"` | `"both"`
-
----
-
-## Prerequisites
-Python 3.8+  `python3 --version` |
-VS Code 
-
----
-
-## Setup (terminal in VS Code)
-
-Open the project in VS Code then open the terminal.
+### 1. Clone the repository
 
 ```bash
-# 1. Go to backend
-cd web-security-scanner/backend
+git clone https://github.com/your-username/aegis-security.git
+cd aegis-security
+```
 
-# 2. Create virtual environment
-python3 -m venv venv
+### 2. Create a virtual environment (recommended)
 
-# 3. Activate it  (you should see "(venv)" in your prompt)
-source venv/bin/activate # for Linux
-venv\Scripts\Activate # for windows
+```bash
+python -m venv venv
+source venv/bin/activate        # Linux / macOS
+venv\Scripts\activate           # Windows
+```
 
-# 4. Install dependencies
+### 3. Install dependencies
+
+```bash
 pip install -r requirements.txt
+```
 
-# 5. Verify
-python -c "import flask, requests, bs4; print('All OK')"
+**Optional — PDF report generation:**
+```bash
+pip install reportlab
 ```
 
 ---
 
-## Running
+## Running the Application
 
-### Terminal 1 — Backend
+### Start the Flask backend
 
 ```bash
-cd web-security-scanner/backend
-venv\Scripts\Activate
 python app.py
 ```
 
-Expected output:
+The API server starts at `http://127.0.0.1:5000`.
+
+### Open the frontend
+
+Open `frontend/index.html` in your browser, or serve the folder with any static file server:
+
+```bash
+# Python one-liner
+cd frontend
+python -m http.server 8080
 ```
- * Running on http://0.0.0.0:5000
- * Debug mode: on
+
+Then visit `http://localhost:8080`.
+
+### Verify the backend is running
+
+```bash
+curl http://127.0.0.1:5000/api/health
 ```
 
-### Terminal 2 — Frontend
-
-**Option A — VS Code Live Server (recommended)**
-Right-click `frontend/index.html` → **Open with Live Server**
-
-
-## How to Use the Scanner
-
-1. Navigate to `scanner.html`
-2. **Discovery tab** — enter a real external URL (e.g. `https://books.toscrape.com`), set depth 2, max pages 40, click **Start Discovery**
-3. **Injection tab** — paste a URL with a query parameter (e.g. `https://example.com/search?q=test`), choose a test profile, click **Run Assessment**
-
-> ⚠ The crawler will crawl *itself* if you point it at `127.0.0.1:5500`. Always use an external target URL.
+Expected response:
+```json
+{
+  "status": "ok",
+  "service": "Aegis Security Platform",
+  "modules": ["discovery", "injection", "analysis", "reporting"]
+}
+```
 
 ---
 
-## Troubleshooting
+## API Reference
 
-| Problem | Fix |
-|---|---|
-| `ModuleNotFoundError: flask` | Run `source venv/bin/activate` first |
-| `NetworkError` on injection tab | Flask server is not running — start `python app.py` |
-| Crawler finds your own files | You entered `127.0.0.1:5500` as the target. Use an external URL |
-| `Address already in use: 5000` | Change port in `app.py` and update `API` constant in `scanner.js` |
-| Logo not showing | Logo uses Bootstrap Icons — no image file needed; ensure Bootstrap Icons CDN loads |
+### `GET /api/health`
+Health check.
+
+---
+
+### `POST /api/scan/crawl`
+Surface discovery only.
+
+**Request body:**
+```json
+{
+  "target_url": "https://example.com",
+  "max_depth":  2,
+  "max_urls":   40
+}
+```
+
+**Response:** `visited_urls`, `failed_urls`, `url_to_links`, crawl statistics.
+
+---
+
+### `POST /api/scan/payload`
+Injection assessment against a single URL (uses `PayloadEngine`).
+
+**Request body:**
+```json
+{
+  "target_url":   "https://example.com/page?id=1",
+  "payload_type": "both",
+  "max_payloads": 20
+}
+```
+
+**Response:** Per-payload results with `status`, `status_code`, `evidence`.
+
+---
+
+### `POST /api/scan/full`
+**Full pipeline** — crawl → inject → analyse → report.
+
+**Request body:**
+```json
+{
+  "target_url":   "https://example.com",
+  "max_depth":    2,
+  "max_urls":     40,
+  "max_targets":  10,
+  "max_payloads": 20,
+  "payload_type": "both"
+}
+```
+
+**Response:**
+```json
+{
+  "scan_id":    "a1b2c3d4",
+  "analysis":   { "total_findings": 2, "overall_risk": "High", ... },
+  "report_urls": {
+    "html": "/api/report/a1b2c3d4/html",
+    "pdf":  "/api/report/a1b2c3d4/pdf"
+  }
+}
+```
+
+---
+
+### `GET /api/report/<scan_id>/html`
+Download the standalone HTML report.
+
+### `GET /api/report/<scan_id>/pdf`
+Download the PDF report (requires `reportlab`).
+
+### `GET /api/report/<scan_id>/summary`
+JSON summary of a completed scan.
+
+---
+
+## Module Documentation
+
+### `scanner/crawler.py` — `Crawler`
+Breadth-first web crawler.
+
+```python
+from scanner import Crawler
+
+crawler = Crawler(max_depth=2, max_urls=50)
+result  = crawler.crawl("https://example.com")
+print(result["visited_urls"])
+```
+
+| Parameter   | Default | Description                       |
+|-------------|---------|-----------------------------------|
+| `max_depth` | 3       | Maximum BFS depth from seed URL   |
+| `max_urls`  | 100     | Hard cap on URLs visited          |
+| `timeout`   | 8       | Per-request timeout (seconds)     |
+| `delay`     | 0.3     | Polite pause between requests (s) |
+
+---
+
+### `scanner/sqli_detector.py` — `SQLiDetector`
+Three-technique SQL injection detector.
+
+```python
+from scanner import SQLiDetector
+
+det    = SQLiDetector()
+result = det.detect("https://example.com/page?id=1", "id")
+if result["confirmed"]:
+    print(f"SQLi found! Severity: {result['highest_severity']}")
+    print(f"Techniques: {result['technique_summary']}")
+```
+
+**Techniques:**
+- **Error-based** — detects database error strings in responses
+- **Boolean-based** — compares response sizes for true vs false conditions
+- **Time-based** — measures actual delay from SLEEP/WAITFOR payloads
+
+---
+
+### `scanner/xss_detector.py` — `XSSDetector`
+Context-aware XSS detection.
+
+```python
+from scanner import XSSDetector
+
+det    = XSSDetector()
+result = det.detect("https://example.com/search?q=test", "q")
+if result["confirmed"]:
+    print(f"XSS found! Executable payloads: {result['executable_count']}")
+```
+
+**Coverage:**
+- HTML body injection (`<script>`, `<img>`, `<svg>`)
+- Attribute break-out (`" onmouseover=...`)
+- Script context (`'-alert(1)-'`)
+- Encoding bypass variants
+
+---
+
+### `scanner/response_analyzer.py` — `ResponseAnalyzer`
+Aggregates raw detector results into a ranked findings report.
+
+```python
+from scanner import SQLiDetector, XSSDetector, ResponseAnalyzer
+
+# ... run detectors ...
+analyzer = ResponseAnalyzer()
+report   = analyzer.analyze(sqli_results, xss_results)
+print(f"Overall risk: {report['overall_risk']}")
+```
+
+**Severity scale:**
+| Level    | CVSS Range  | Description                          |
+|----------|-------------|--------------------------------------|
+| Critical | 9.0 – 10.0  | Boolean/time-based SQLi confirmed    |
+| High     | 7.0 – 8.9   | Error-based SQLi / executable XSS   |
+| Medium   | 4.0 – 6.9   | Reflected XSS (unconfirmed context) |
+| Low      | 0.1 – 3.9   | Informational indicators             |
+
+---
+
+### `scanner/report_generator.py` — `ReportGenerator`
+Generates HTML and PDF reports.
+
+```python
+from scanner import ReportGenerator
+
+gen       = ReportGenerator(output_dir="reports")
+html_path = gen.generate_html(analysis, scan_meta, "scan-001")
+pdf_path  = gen.generate_pdf(analysis, scan_meta, "scan-001")
+```
+
+**HTML report** — fully self-contained, no external dependencies.  
+**PDF report** — requires `reportlab` (`pip install reportlab`).
+
+---
+
+### `scanner/controller.py` — `ScannerController`
+Runs the complete pipeline in one call.
+
+```python
+from scanner import ScannerController
+
+controller = ScannerController(
+    report_dir="reports",
+    max_crawl_depth=2,
+    max_crawl_urls=40,
+    payload_type="both",
+)
+result = controller.run_scan("https://example.com")
+print(result["analysis"]["overall_risk"])
+print(result["report_html_path"])
+```
+
+---
+
+## Testing
+
+Test against intentionally vulnerable applications **only**. Recommended targets:
+
+| Target             | Setup |
+|--------------------|-------|
+| [DVWA](https://github.com/digininja/DVWA) | `docker run -p 80:80 vulnerables/web-dvwa` |
+| [OWASP Juice Shop](https://github.com/juice-shop/juice-shop) | `docker run -p 3000:3000 bkimminich/juice-shop` |
+| [WebGoat](https://github.com/WebGoat/WebGoat) | `docker run -p 8080:8080 webgoat/goat-and-wolf` |
+
+**Example test run against Juice Shop:**
+
+```bash
+# Start Juice Shop
+docker run -d -p 3000:3000 bkimminich/juice-shop
+
+# Run full scan via API
+curl -X POST http://127.0.0.1:5000/api/scan/full \
+  -H "Content-Type: application/json" \
+  -d '{"target_url":"http://localhost:3000","max_depth":2,"max_urls":30}'
+```
+
+---
+
+## Ethics & Responsible Use
+
+> **Only run scans against applications you own or have explicit written authorisation to test.**
+
+- All payloads are **safe, non-destructive** test strings (no `DROP TABLE`, no real data modification)
+- The tool uses a polite crawl delay (`0.3 s` by default) to avoid disrupting services
+- A warning is displayed in the UI before every injection scan
+- The User-Agent header is set to `AegisSecurity/1.0 Web Application Assessment` to identify the scanner
+
+---
+
+## Roadmap
+
+- [ ] **Header/cookie injection** — extend `SQLiDetector` and `XSSDetector` to POST body and headers
+- [ ] **Stored XSS detection** — second-request comparison after payload submission
+- [ ] **CSRF detection** — check for missing anti-CSRF tokens on state-changing forms
+- [ ] **Authentication support** — session cookie / Bearer token injection for authenticated scans
+- [ ] **Scan history** — persist scan results to SQLite for historical comparison
+- [ ] **Scheduled scans** — APScheduler integration for recurring assessments
+- [ ] **CI/CD integration** — CLI entry point for pipeline usage
+- [ ] **Selenium mode** — JavaScript-rendered page support for SPAs
+
+---
+
+## License
+
+MIT — see `LICENSE` for details.
+
+---
+
+*Aegis Security Platform*
