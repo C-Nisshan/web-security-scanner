@@ -16,8 +16,14 @@ lxml>=5.0.0          # faster BS4 parser (optional but recommended)
 selenium>=4.18.0
 webdriver-manager>=4.0.0
 
+# Playwright browser automation (modern alternative to Selenium)
+playwright>=1.40.0
+
 # Report generation (PDF — optional but recommended)
 reportlab>=4.1.0
 
 # Utilities
 python-dotenv>=1.0.0  # for .env config files
+
+flask-swagger-ui>=4.11.2
+apispec>=6.6.0

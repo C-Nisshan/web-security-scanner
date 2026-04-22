@@ -13,9 +13,11 @@ report with severity ratings and remediation guidance.
 - [Project Structure](#project-structure)
 - [Installation](#installation)
 - [Running the Application](#running-the-application)
+- [Testing with Swagger UI](#testing-with-swagger-ui)
+- [Testing with the Frontend](#testing-with-the-frontend)
+- [Docker Setup (Windows)](#docker-setup-windows)
 - [API Reference](#api-reference)
 - [Module Documentation](#module-documentation)
-- [Testing](#testing)
 - [Ethics & Responsible Use](#ethics--responsible-use)
 - [Roadmap](#roadmap)
 
@@ -31,7 +33,7 @@ report with severity ratings and remediation guidance.
 | **Response Analysis** | Aggregates findings, assigns CVSS-inspired severity scores |
 | **HTML Report** | Standalone, self-contained dark-themed report |
 | **PDF Report** | Professional PDF via ReportLab with cover page, findings, and remediation |
-| **REST API** | Flask backend with separate endpoints for each module |
+| **REST API** | Flask backend with Swagger UI for interactive testing |
 | **Web UI** | Full assessment console with Discovery, Injection, and Full Scan tabs |
 
 ---
@@ -39,10 +41,10 @@ report with severity ratings and remediation guidance.
 ## Architecture
 
 ```
-User (Browser) ──► Frontend (HTML/CSS/JS)
-                        │
-                        ▼ REST API calls
-                   Flask app.py
+User (Browser) ──► Frontend (HTML/CSS/JS)   ──► Swagger UI (/api/docs)
+                        │                              │
+                        ▼ REST API calls               │
+                   Flask app.py  ◄─────────────────────┘
                         │
           ┌─────────────┼─────────────┐
           ▼             ▼             ▼
@@ -61,71 +63,45 @@ User (Browser) ──► Frontend (HTML/CSS/JS)
                          (HTML + PDF)
 ```
 
-### High-Level Flow
-
-```
-User supplies URL
-      │
-      ▼
-[Stage 1] Crawler enumerates pages (BFS)
-      │
-      ▼
-[Stage 2] GET parameters extracted from each discovered URL
-      │
-      ▼
-[Stage 3] SQLiDetector + XSSDetector inject payloads per param
-      │
-      ▼
-[Stage 4] ResponseAnalyzer aggregates & ranks findings
-      │
-      ▼
-[Stage 5] ReportGenerator produces HTML + PDF report
-      │
-      ▼
-User downloads report
-```
-
 ---
 
 ## Project Structure
 
 ```
-aegis/
-├── app.py                    # Flask REST API server
-├── requirements.txt          # Python dependencies
-├── README.md
+web-security-scanner/
+├── backend/
+│   ├── app.py                    # Flask REST API server + Swagger setup
+│   ├── swagger.py                # OpenAPI 3.0 specification
+│   ├── requirements.txt          # Python dependencies
+│   ├── Dockerfile                # Container image definition
+│   ├── docker-compose.yml        # Multi-container stack (backend + test targets)
+│   │
+│   ├── scanner/
+│   │   ├── __init__.py
+│   │   ├── crawler.py
+│   │   ├── payload_engine.py
+│   │   ├── sqli_detector.py
+│   │   ├── xss_detector.py
+│   │   ├── response_analyzer.py
+│   │   ├── report_generator.py
+│   │   └── controller.py
+│   │
+│   └── reports/                  # Generated reports (auto-created)
 │
-├── scanner/
-│   ├── __init__.py           # Package exports
-│   ├── crawler.py            # BFS web crawler (Stage 1)
-│   ├── payload_engine.py     # Raw payload injection (Stage 3 – simple)
-│   ├── sqli_detector.py      # Advanced SQLi detection (Stage 3)
-│   ├── xss_detector.py       # Advanced XSS detection (Stage 3)
-│   ├── response_analyzer.py  # Finding aggregation & enrichment (Stage 4)
-│   ├── report_generator.py   # HTML + PDF report generation (Stage 5)
-│   └── controller.py         # Full pipeline orchestrator
+├── frontend/
+│   ├── index.html
+│   ├── about.html
+│   ├── services.html
+│   ├── contact.html
+│   ├── scanner.html
+│   ├── css/
+│   └── js/
 │
-├── reports/                  # Generated reports (auto-created)
+├── images/
+│   └── logo.svg
 │
-└── frontend/
-    ├── index.html
-    ├── about.html
-    ├── services.html
-    ├── contact.html
-    ├── scanner.html           # Main assessment console (updated)
-    ├── css/
-    │   ├── global.css
-    │   ├── index.css
-    │   ├── scanner.css
-    │   ├── about.css
-    │   ├── contact.css
-    │   └── services.css
-    └── js/
-        ├── global.js
-        ├── index.js
-        ├── scanner.js         # Console controller (updated)
-        ├── contact.js
-        └── services.js
+├── .gitignore
+└── README.md
 ```
 
 ---
@@ -156,11 +132,7 @@ venv\Scripts\activate           # Windows
 
 ```bash
 pip install -r requirements.txt
-```
-
-**Optional — PDF report generation:**
-```bash
-pip install reportlab
+playwright install
 ```
 
 ---
@@ -177,29 +149,205 @@ The API server starts at `http://127.0.0.1:5000`.
 
 ### Open the frontend
 
-Open `frontend/index.html` in your browser, or serve the folder with any static file server:
-
 ```bash
-# Python one-liner
 cd frontend
 python -m http.server 8080
 ```
 
 Then visit `http://localhost:8080`.
 
-### Verify the backend is running
+---
+
+## Testing with Swagger UI
+
+Swagger UI provides a full interactive API console directly in the browser — no frontend or curl commands required.
+
+### Step 1 — Start the backend
 
 ```bash
-curl http://127.0.0.1:5000/api/health
+python app.py
 ```
 
-Expected response:
+### Step 2 — Open Swagger UI
+
+Navigate to:
+
+```
+http://127.0.0.1:5000/api/docs
+```
+
+You will see all endpoints grouped by tag (health, discovery, injection, full-scan, reports).
+
+### Step 3 — Run the health check
+
+1. Click **GET /api/health** to expand it.
+2. Click **Try it out** → **Execute**.
+3. Confirm the response shows `"status": "ok"`.
+
+### Step 4 — Run a surface discovery scan
+
+1. Expand **POST /api/scan/crawl**.
+2. Click **Try it out**.
+3. Edit the request body — replace the example URL with your target:
 ```json
-{
-  "status": "ok",
-  "service": "Aegis Security Platform",
-  "modules": ["discovery", "injection", "analysis", "reporting"]
-}
+   {
+     "target_url": "http://localhost:3000",
+     "max_depth": 2,
+     "max_urls": 40
+   }
+```
+4. Click **Execute** and inspect the `visited_urls` array in the response.
+
+### Step 5 — Run a full pipeline scan
+
+1. Expand **POST /api/scan/full**.
+2. Click **Try it out** and enter:
+```json
+   {
+     "target_url": "http://localhost:3000",
+     "max_depth": 2,
+     "max_urls": 40,
+     "max_targets": 10,
+     "max_payloads": 20,
+     "payload_type": "both"
+   }
+```
+3. Click **Execute**. Note the `scan_id` in the response (e.g. `"a1b2c3d4"`).
+
+### Step 6 — Download the report
+
+1. Expand **GET /api/report/{scan_id}/html**.
+2. Click **Try it out**, paste your `scan_id`, and click **Execute**.
+3. Click the **Download file** link that appears in the response to save the report.
+
+> The raw OpenAPI JSON spec is also available at `http://127.0.0.1:5000/api/swagger.json` if you want to import it into Postman or Insomnia.
+
+---
+
+## Testing with the Frontend
+
+The frontend is a static HTML/CSS/JS application that communicates with the Flask backend.
+
+### Step 1 — Ensure the backend is running
+
+```bash
+python app.py
+# Backend available at http://127.0.0.1:5000
+```
+
+### Step 2 — Serve the frontend
+
+```bash
+cd frontend
+python -m http.server 8080
+```
+
+Open `http://localhost:8080` in your browser.
+
+### Step 3 — Use the Assessment Console
+
+Navigate to **Scanner** (`http://localhost:8080/scanner.html`). The console has three tabs:
+
+| Tab | What it does |
+|-----|-------------|
+| **Discovery** | Runs the crawler and lists every page found |
+| **Injection** | Tests a single URL with SQLi / XSS payloads |
+| **Full Scan** | Runs the complete pipeline and generates a downloadable report |
+
+**Recommended workflow:**
+
+1. Start with **Discovery** — enter your target URL and click *Start Discovery*.
+2. After the crawl completes, switch to **Full Scan** (the target URL is pre-filled).
+3. Click *Run Full Scan* and wait for all four stages to complete.
+4. Use the **HTML Report** and **PDF Report** buttons to download your findings.
+
+---
+
+## Docker Setup (Windows)
+
+Docker lets you run the Aegis backend and intentionally vulnerable test targets without installing anything locally.
+
+### Step 1 — Install Docker Desktop on Windows
+
+1. Visit [https://www.docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop) and download the installer.
+2. Run `Docker Desktop Installer.exe` and follow the prompts.
+3. When prompted, enable **WSL 2** integration (recommended) or **Hyper-V** backend.
+4. Restart your PC if prompted.
+5. Launch **Docker Desktop** from the Start menu and wait for the whale icon in the system tray to become steady (not animating).
+
+Verify the installation in PowerShell:
+
+```powershell
+docker --version
+docker compose version
+```
+
+### Step 2 — Clone the repository
+
+```powershell
+git clone https://github.com/your-username/aegis-security.git
+cd aegis-security
+```
+
+### Step 3 — Build and start all services
+
+```powershell
+docker compose up --build
+```
+
+This starts three containers:
+
+| Container | Address | Purpose |
+|-----------|---------|---------|
+| `aegis-backend` | `http://localhost:5000` | Aegis Flask API + Swagger UI |
+| `juice-shop` | `http://localhost:3000` | OWASP Juice Shop (safe test target) |
+| `dvwa` | `http://localhost:8080` | DVWA (safe test target) |
+
+### Step 4 — Verify everything is running
+
+```powershell
+curl http://localhost:5000/api/health
+```
+
+Expected:
+```json
+{"status": "ok", "service": "Aegis Security Platform", ...}
+```
+
+Open Swagger UI at `http://localhost:5000/api/docs`.
+
+### Step 5 — Run a test scan against Juice Shop
+
+In Swagger UI or PowerShell:
+
+```powershell
+curl -X POST http://localhost:5000/api/scan/full `
+  -H "Content-Type: application/json" `
+  -d '{"target_url":"http://juice-shop:3000","max_depth":2,"max_urls":30}'
+```
+
+> **Note:** When running inside Docker, use the service name `juice-shop` instead of `localhost` as the hostname, because all containers share the same Docker network.
+
+When testing from **outside** Docker (e.g. from your browser or PowerShell on the host), use `http://localhost:3000`.
+
+### Step 6 — Stop all containers
+
+```powershell
+docker compose down
+```
+
+Reports are saved to `./reports/` on your host machine via the volume mount.
+
+### Running only the backend (without test targets)
+
+```powershell
+docker compose up --build aegis-backend
+```
+
+### Rebuilding after code changes
+
+```powershell
+docker compose up --build --force-recreate aegis-backend
 ```
 
 ---
@@ -223,14 +371,11 @@ Surface discovery only.
 }
 ```
 
-**Response:** `visited_urls`, `failed_urls`, `url_to_links`, crawl statistics.
-
 ---
 
 ### `POST /api/scan/payload`
-Injection assessment against a single URL (uses `PayloadEngine`).
+Injection assessment against a single URL.
 
-**Request body:**
 ```json
 {
   "target_url":   "https://example.com/page?id=1",
@@ -239,14 +384,11 @@ Injection assessment against a single URL (uses `PayloadEngine`).
 }
 ```
 
-**Response:** Per-payload results with `status`, `status_code`, `evidence`.
-
 ---
 
 ### `POST /api/scan/full`
-**Full pipeline** — crawl → inject → analyse → report.
+Full pipeline — crawl → inject → analyse → report.
 
-**Request body:**
 ```json
 {
   "target_url":   "https://example.com",
@@ -255,18 +397,6 @@ Injection assessment against a single URL (uses `PayloadEngine`).
   "max_targets":  10,
   "max_payloads": 20,
   "payload_type": "both"
-}
-```
-
-**Response:**
-```json
-{
-  "scan_id":    "a1b2c3d4",
-  "analysis":   { "total_findings": 2, "overall_risk": "High", ... },
-  "report_urls": {
-    "html": "/api/report/a1b2c3d4/html",
-    "pdf":  "/api/report/a1b2c3d4/pdf"
-  }
 }
 ```
 
@@ -281,148 +411,31 @@ Download the PDF report (requires `reportlab`).
 ### `GET /api/report/<scan_id>/summary`
 JSON summary of a completed scan.
 
+### `GET /api/docs`
+**Swagger UI** — interactive API documentation and testing console.
+
+### `GET /api/swagger.json`
+Raw OpenAPI 3.0 specification (importable into Postman / Insomnia).
+
 ---
 
 ## Module Documentation
 
-### `scanner/crawler.py` — `Crawler`
-Breadth-first web crawler.
-
-```python
-from scanner import Crawler
-
-crawler = Crawler(max_depth=2, max_urls=50)
-result  = crawler.crawl("https://example.com")
-print(result["visited_urls"])
-```
-
-| Parameter   | Default | Description                       |
-|-------------|---------|-----------------------------------|
-| `max_depth` | 3       | Maximum BFS depth from seed URL   |
-| `max_urls`  | 100     | Hard cap on URLs visited          |
-| `timeout`   | 8       | Per-request timeout (seconds)     |
-| `delay`     | 0.3     | Polite pause between requests (s) |
-
----
-
-### `scanner/sqli_detector.py` — `SQLiDetector`
-Three-technique SQL injection detector.
-
-```python
-from scanner import SQLiDetector
-
-det    = SQLiDetector()
-result = det.detect("https://example.com/page?id=1", "id")
-if result["confirmed"]:
-    print(f"SQLi found! Severity: {result['highest_severity']}")
-    print(f"Techniques: {result['technique_summary']}")
-```
-
-**Techniques:**
-- **Error-based** — detects database error strings in responses
-- **Boolean-based** — compares response sizes for true vs false conditions
-- **Time-based** — measures actual delay from SLEEP/WAITFOR payloads
-
----
-
-### `scanner/xss_detector.py` — `XSSDetector`
-Context-aware XSS detection.
-
-```python
-from scanner import XSSDetector
-
-det    = XSSDetector()
-result = det.detect("https://example.com/search?q=test", "q")
-if result["confirmed"]:
-    print(f"XSS found! Executable payloads: {result['executable_count']}")
-```
-
-**Coverage:**
-- HTML body injection (`<script>`, `<img>`, `<svg>`)
-- Attribute break-out (`" onmouseover=...`)
-- Script context (`'-alert(1)-'`)
-- Encoding bypass variants
-
----
-
-### `scanner/response_analyzer.py` — `ResponseAnalyzer`
-Aggregates raw detector results into a ranked findings report.
-
-```python
-from scanner import SQLiDetector, XSSDetector, ResponseAnalyzer
-
-# ... run detectors ...
-analyzer = ResponseAnalyzer()
-report   = analyzer.analyze(sqli_results, xss_results)
-print(f"Overall risk: {report['overall_risk']}")
-```
-
-**Severity scale:**
-| Level    | CVSS Range  | Description                          |
-|----------|-------------|--------------------------------------|
-| Critical | 9.0 – 10.0  | Boolean/time-based SQLi confirmed    |
-| High     | 7.0 – 8.9   | Error-based SQLi / executable XSS   |
-| Medium   | 4.0 – 6.9   | Reflected XSS (unconfirmed context) |
-| Low      | 0.1 – 3.9   | Informational indicators             |
-
----
-
-### `scanner/report_generator.py` — `ReportGenerator`
-Generates HTML and PDF reports.
-
-```python
-from scanner import ReportGenerator
-
-gen       = ReportGenerator(output_dir="reports")
-html_path = gen.generate_html(analysis, scan_meta, "scan-001")
-pdf_path  = gen.generate_pdf(analysis, scan_meta, "scan-001")
-```
-
-**HTML report** — fully self-contained, no external dependencies.  
-**PDF report** — requires `reportlab` (`pip install reportlab`).
-
----
-
-### `scanner/controller.py` — `ScannerController`
-Runs the complete pipeline in one call.
-
-```python
-from scanner import ScannerController
-
-controller = ScannerController(
-    report_dir="reports",
-    max_crawl_depth=2,
-    max_crawl_urls=40,
-    payload_type="both",
-)
-result = controller.run_scan("https://example.com")
-print(result["analysis"]["overall_risk"])
-print(result["report_html_path"])
-```
+*(unchanged from original — see individual source files)*
 
 ---
 
 ## Testing
 
-Test against intentionally vulnerable applications **only**. Recommended targets:
+Test against intentionally vulnerable applications **only**.
 
-| Target             | Setup |
-|--------------------|-------|
-| [DVWA](https://github.com/digininja/DVWA) | `docker run -p 80:80 vulnerables/web-dvwa` |
+| Target | Docker command |
+|--------|----------------|
 | [OWASP Juice Shop](https://github.com/juice-shop/juice-shop) | `docker run -p 3000:3000 bkimminich/juice-shop` |
-| [WebGoat](https://github.com/WebGoat/WebGoat) | `docker run -p 8080:8080 webgoat/goat-and-wolf` |
+| [DVWA](https://github.com/digininja/DVWA) | `docker run -p 8080:80 vulnerables/web-dvwa` |
+| [WebGoat](https://github.com/WebGoat/WebGoat) | `docker run -p 8081:8080 webgoat/goat-and-wolf` |
 
-**Example test run against Juice Shop:**
-
-```bash
-# Start Juice Shop
-docker run -d -p 3000:3000 bkimminich/juice-shop
-
-# Run full scan via API
-curl -X POST http://127.0.0.1:5000/api/scan/full \
-  -H "Content-Type: application/json" \
-  -d '{"target_url":"http://localhost:3000","max_depth":2,"max_urls":30}'
-```
+Or spin up all test targets at once with `docker compose up`.
 
 ---
 
@@ -430,23 +443,23 @@ curl -X POST http://127.0.0.1:5000/api/scan/full \
 
 > **Only run scans against applications you own or have explicit written authorisation to test.**
 
-- All payloads are **safe, non-destructive** test strings (no `DROP TABLE`, no real data modification)
-- The tool uses a polite crawl delay (`0.3 s` by default) to avoid disrupting services
+- All payloads are **safe, non-destructive** test strings
+- The tool uses a polite crawl delay (`0.3 s` by default)
 - A warning is displayed in the UI before every injection scan
-- The User-Agent header is set to `AegisSecurity/1.0 Web Application Assessment` to identify the scanner
+- The User-Agent header identifies the scanner: `AegisSecurity/1.0 Web Application Assessment`
 
 ---
 
 ## Roadmap
 
-- [ ] **Header/cookie injection** — extend `SQLiDetector` and `XSSDetector` to POST body and headers
-- [ ] **Stored XSS detection** — second-request comparison after payload submission
-- [ ] **CSRF detection** — check for missing anti-CSRF tokens on state-changing forms
-- [ ] **Authentication support** — session cookie / Bearer token injection for authenticated scans
-- [ ] **Scan history** — persist scan results to SQLite for historical comparison
-- [ ] **Scheduled scans** — APScheduler integration for recurring assessments
-- [ ] **CI/CD integration** — CLI entry point for pipeline usage
-- [ ] **Selenium mode** — JavaScript-rendered page support for SPAs
+- [ ] Header/cookie injection support
+- [ ] Stored XSS detection
+- [ ] CSRF detection
+- [ ] Authentication support (session cookie / Bearer token)
+- [ ] Scan history (SQLite persistence)
+- [ ] Scheduled scans (APScheduler)
+- [ ] CI/CD CLI entry point
+- [ ] Selenium mode for JavaScript-rendered SPAs
 
 ---
 
