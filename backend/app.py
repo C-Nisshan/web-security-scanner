@@ -23,6 +23,10 @@ from scanner.crawler          import Crawler
 from scanner.payload_engine   import PayloadEngine
 from scanner.controller       import ScannerController
 
+import json
+from flask_swagger_ui import get_swaggerui_blueprint
+from swagger import SWAGGER_SPEC
+
 # ── App setup ────────────────────────────────────────────────
 
 logging.basicConfig(
@@ -34,6 +38,27 @@ logger = logging.getLogger("app")
 
 app = Flask(__name__)
 CORS(app)
+
+# ── Swagger UI setup ────────
+
+SWAGGER_URL  = '/api/docs'          # URL to access the Swagger UI
+API_SPEC_URL = '/api/swagger.json'  # URL that serves the raw OpenAPI spec
+
+swaggerui_blueprint = get_swaggerui_blueprint(
+    SWAGGER_URL,
+    API_SPEC_URL,
+    config={'app_name': "Aegis Security Platform"}
+)
+app.register_blueprint(swaggerui_blueprint, url_prefix=SWAGGER_URL)
+
+@app.route('/api/swagger.json', methods=['GET'])
+def swagger_spec():
+    """Serve the OpenAPI 3.0 specification."""
+    return app.response_class(
+        response=json.dumps(SWAGGER_SPEC, indent=2),
+        status=200,
+        mimetype='application/json'
+    )
 
 REPORTS_DIR = os.path.join(os.path.dirname(__file__), "reports")
 os.makedirs(REPORTS_DIR, exist_ok=True)
@@ -266,4 +291,4 @@ def server_error(exc):
 # ── Entry point ───────────────────────────────────────────────
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=True, use_reloader=False)
