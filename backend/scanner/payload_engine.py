@@ -6,6 +6,9 @@ Now supports:
 - POST JSON injection
 - POST form-data injection
 - Automatic parameter discovery
+
+Ethics note: ALL payloads are safe, non-destructive test strings.
+No DDL (DROP/DELETE/TRUNCATE) or DML mutations are used.
 """
 
 import time
@@ -37,7 +40,10 @@ SQLI_PAYLOADS = [
     "1' ORDER BY 1 --",
     "1 UNION SELECT NULL --",
     "1 AND 1=2",
-    "'; DROP TABLE users --",
+    # BUG FIX: replaced "'; DROP TABLE users --" (destructive DDL) with a
+    # safe read-only probe that still breaks SQL syntax and triggers error
+    # messages without mutating any data.
+    "'; SELECT 1 --",
 ]
 
 XSS_PAYLOADS = [
@@ -47,14 +53,31 @@ XSS_PAYLOADS = [
     "\"><script>alert(1)</script>",
 ]
 
-
+# Aligned with sqli_detector.ERROR_SIGNATURES for consistency
 SQLI_SIGNATURES = [
-    "sql syntax",
-    "mysql",
-    "postgresql",
-    "sqlite",
-    "warning",
+    # MySQL
+    "you have an error in your sql syntax",
+    "warning: mysql",
+    "mysql_fetch",
+    # PostgreSQL
+    "pg_query()",
+    "postgresql query failed",
+    # SQLite
+    "sqlite error",
+    "sqlite3.operationalerror",
+    # MSSQL
+    "unclosed quotation mark",
+    "incorrect syntax near",
+    "microsoft ole db",
+    # Oracle
     "ora-",
+    "oracle error",
+    # Generic
+    "sql syntax",
+    "database error",
+    "sqlexception",
+    "syntax error",
+    "invalid query",
 ]
 
 
@@ -71,7 +94,7 @@ def _build_url_with_params(url: str, params: Dict[str, Any]) -> str:
 def _detect_sqli(body: str) -> Tuple[bool, str]:
     b = body.lower()
     for sig in SQLI_SIGNATURES:
-        if sig in b:
+        if sig.lower() in b:
             return True, sig
     return False, ""
 
