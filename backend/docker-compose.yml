@@ -1,18 +1,23 @@
 version: "3.9"
 
 services:
+
+  # ── Aegis Backend ─────────────────────────────────────────────
   aegis-backend:
     build: .
     container_name: aegis-backend
     ports:
       - "5000:5000"
     volumes:
-      - ./reports:/app/reports   # persist generated reports
+      - ./reports:/app/reports
     environment:
       - FLASK_ENV=production
     restart: unless-stopped
+    depends_on:
+      - juice-shop
+      - dvwa
 
-  # Optional: OWASP Juice Shop for safe testing
+  # ── OWASP Juice Shop ──────────────────────────────────────────
   juice-shop:
     image: bkimminich/juice-shop
     container_name: juice-shop
@@ -20,10 +25,40 @@ services:
       - "3000:3000"
     restart: unless-stopped
 
-  # Optional: DVWA for safe testing
+  # ── DVWA (PHP frontend) ───────────────────────────────────────
   dvwa:
     image: vulnerables/web-dvwa
     container_name: dvwa
     ports:
       - "8080:80"
+    environment:
+      - DB_SERVER=dvwa-db
+      - DB_USER=dvwa
+      - DB_PASSWORD=p@ssw0rd
+      - DB_DATABASE=dvwa
     restart: unless-stopped
+    depends_on:
+      dvwa-db:
+        condition: service_healthy   # waits until MySQL is ready
+
+  # ── DVWA MySQL database ───────────────────────────────────────
+  dvwa-db:
+    image: mysql:5.7
+    container_name: dvwa-db
+    environment:
+      MYSQL_ROOT_PASSWORD: dvwa_root
+      MYSQL_DATABASE: dvwa
+      MYSQL_USER: dvwa
+      MYSQL_PASSWORD: p@ssw0rd
+    volumes:
+      - dvwa-db-data:/var/lib/mysql   # persist DB across restarts
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pdvwa_root"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+volumes:
+  dvwa-db-data:
