@@ -1,6 +1,6 @@
 """
-/backend/scanner/auth_manager.py — Authentication Manager
-=========================================
+/backend/scanner/auth_manager.py — Authentication Manager  v3.1
+================================================================
 Centralises all authentication logic for the Aegis scanner.
 
 Supported auth modes
@@ -9,28 +9,23 @@ Supported auth modes
   bearer  — Authorization: Bearer <token>
   basic   — HTTP Basic (username / password header)
   dvwa    — DVWA form login with automatic CSRF extraction
+             + automatic database initialisation on cold-start  ← NEW
   form    — Generic form login with hidden-input CSRF handling
 
+v3.1 changes
+------------
+- login_dvwa():
+    * Calls _dvwa_ensure_db() before login to auto-create the DVWA
+      database if it has not been set up yet (cold Docker start).
+    * Retries the user_token fetch after DB setup.
+    * Success detection now uses URL-change heuristic in addition to
+      body-text checks, so it works across DVWA versions.
+    * Detailed per-step logging so failures are easy to diagnose.
+- build_auth_manager() unchanged in interface; adds dvwa_form label.
+
 Layer : Infrastructure Layer
-
-Usage
------
-    # Cookie / session auth
-    auth = AuthManager()
-    auth.apply_cookie_auth("PHPSESSID=abc123; security=low")
-    session = auth.get_session()
-
-    # DVWA auto-login
-    auth = AuthManager()
-    ok = auth.login_dvwa("http://dvwa:80", "admin", "password")
-    session = auth.get_session()
-
-    # Generic Bearer token
-    auth = AuthManager()
-    auth.apply_bearer_auth("eyJhbGci...")
-    session = auth.get_session()
 """
-
+import time
 import logging
 import requests
 import urllib3
@@ -53,7 +48,8 @@ class AuthManager:
     """
     Manages authenticated HTTP sessions for the Aegis scanner pipeline.
 
-    All auth methods return ``self`` for fluent chaining, e.g.:
+    All auth methods return ``self`` for fluent chaining, e.g.::
+
         session = AuthManager().apply_cookie_auth("...").get_session()
     """
 
@@ -94,13 +90,7 @@ class AuthManager:
     # ── Bearer token auth ─────────────────────────────────────
 
     def apply_bearer_auth(self, token: str) -> "AuthManager":
-        """
-        Inject an Authorization: Bearer header.
-
-        Parameters
-        ----------
-        token : raw JWT or API token (without the 'Bearer ' prefix)
-        """
+        """Inject an Authorization: Bearer header."""
         if not token or not token.strip():
             logger.warning("[AuthManager] Empty bearer token — skipped")
             return self
@@ -123,93 +113,125 @@ class AuthManager:
         logger.info("[AuthManager] Basic auth applied (user=%s)", username)
         return self
 
-    # ── DVWA auto-login ───────────────────────────────────────
+    # ── DVWA helpers ──────────────────────────────────────────
 
-    def login_dvwa(
-        self,
-        base_url: str,
-        username: str = "admin",
-        password: str = "password",
-        security_level: str = "low",
-    ) -> bool:
-        """
-        Authenticate against DVWA, handling its CSRF user_token.
+    def _dvwa_ensure_db(self, base_url: str) -> bool:
+        setup_url = f"{base_url}/setup.php"
+        try:
+            resp = self._session.get(setup_url, timeout=12)
+        except Exception as exc:
+            logger.warning("[AuthManager] DVWA setup check failed: %s", exc)
+            return False
 
-        Steps
-        -----
-        1. GET /login.php  → extract user_token
-        2. POST credentials + token  → verify success
-        3. POST /security.php        → set security level
+        body = resp.text.lower()
 
-        Parameters
-        ----------
-        base_url       : DVWA base URL, e.g. "http://dvwa:80"
-        username       : default "admin"
-        password       : default "password"
-        security_level : "low" | "medium" | "high" | "impossible"
+        # If we're not on setup.php or there's nothing to create, we're good
+        if "create" not in body and "setup" not in body:
+            logger.debug("[AuthManager] DVWA DB already initialised")
+            return True
 
-        Returns
-        -------
-        True on success, False on failure.
-        """
-        base_url   = base_url.rstrip("/")
-        login_url  = f"{base_url}/login.php"
-        sec_url    = f"{base_url}/security.php"
+        logger.info("[AuthManager] DVWA database not initialised — running setup…")
+
+        soup      = BeautifulSoup(resp.text, "html.parser")
+        token     = soup.find("input", {"name": "user_token"})
+        token_val = token["value"] if token else ""
 
         try:
-            # ── Step 1: fetch login page ──────────────────────
-            resp = self._session.get(login_url, timeout=12)
-            resp.raise_for_status()
-
-            soup        = BeautifulSoup(resp.text, "html.parser")
-            token_tag   = soup.find("input", {"name": "user_token"})
-            user_token  = token_tag["value"] if token_tag else ""
-
-            if not user_token:
-                logger.warning("[AuthManager] DVWA: user_token not found — "
-                               "attempting login without it")
-
-            # ── Step 2: POST credentials ──────────────────────
-            login_resp = self._session.post(
-                login_url,
+            self._session.post(
+                setup_url,
                 data={
-                    "username"  : username,
-                    "password"  : password,
-                    "Login"     : "Login",
-                    "user_token": user_token,
+                    "create_db"  : "Create / Reset Database",
+                    "user_token" : token_val,
                 },
-                timeout=12,
-                allow_redirects=True,
+                timeout=20,
+            )
+            # Give MySQL a moment to commit before we try to log in
+            time.sleep(3)                          # ← this was missing
+            logger.info("[AuthManager] DVWA DB setup POST sent")
+            return True
+        except Exception as exc:
+            logger.warning("[AuthManager] DVWA setup POST error: %s", exc)
+            return True
+
+    def _dvwa_fetch_token(self, login_url: str) -> str:
+        """Fetch the DVWA login page and return the user_token value (or '')."""
+        try:
+            resp  = self._session.get(login_url, timeout=12)
+            soup  = BeautifulSoup(resp.text, "html.parser")
+            token = soup.find("input", {"name": "user_token"})
+            val   = token["value"] if token else ""
+            logger.debug("[AuthManager] DVWA user_token fetched: %r", val)
+            return val
+        except Exception as exc:
+            logger.warning("[AuthManager] DVWA token fetch error: %s", exc)
+            return ""
+
+    # ── DVWA auto-login ───────────────────────────────────────
+
+    def login_dvwa(self, base_url, username="admin",
+               password="password", security_level="low",
+               retries=3) -> bool:           # ← add retries param
+        base_url  = base_url.rstrip("/")
+        login_url = f"{base_url}/login.php"
+
+        self._dvwa_ensure_db(base_url)
+
+        for attempt in range(1, retries + 1):
+            logger.info("[AuthManager] DVWA login attempt %d/%d", attempt, retries)
+
+            user_token = self._dvwa_fetch_token(login_url)
+
+            try:
+                login_resp = self._session.post(
+                    login_url,
+                    data={
+                        "username"  : username,
+                        "password"  : password,
+                        "Login"     : "Login",
+                        "user_token": user_token,
+                    },
+                    timeout=15,
+                    allow_redirects=True,
+                )
+            except Exception as exc:
+                logger.warning("[AuthManager] Login attempt %d failed: %s", attempt, exc)
+                time.sleep(5)
+                continue
+
+            body_l    = login_resp.text.lower()
+            final_url = login_resp.url
+
+            if "setup.php" in final_url or "create / reset" in body_l:
+                logger.warning("[AuthManager] Still on setup page — waiting 5 s…")
+                time.sleep(5)
+                self._dvwa_ensure_db(base_url)
+                continue
+
+            success = (
+                "login.php" not in final_url
+                or any(kw in body_l for kw in ("logout", "welcome", "vulnerability"))
             )
 
-            # ── Step 3: confirm success ───────────────────────
-            body = login_resp.text.lower()
-            if "logout" in body or "welcome" in body or "dvwa security" in body:
-                logger.info("[AuthManager] DVWA login OK (user=%s)", username)
-
-                # ── Step 4: set security level ─────────────────
+            if success:
+                logger.info("[AuthManager] DVWA login OK on attempt %d", attempt)
+                # Set security level
                 try:
                     self._session.post(
-                        sec_url,
-                        data={"security": security_level,
-                              "seclev_submit": "Submit"},
+                        f"{base_url}/security.php",
+                        data={"security": security_level, "seclev_submit": "Submit"},
                         timeout=10,
                     )
-                    logger.info("[AuthManager] DVWA security level → %s",
-                                security_level)
                 except Exception:
-                    logger.warning("[AuthManager] Could not set DVWA security level")
-
+                    pass
                 self._authenticated = True
                 self._auth_type = "dvwa_form"
                 return True
 
-            logger.error("[AuthManager] DVWA login FAILED for user='%s'", username)
-            return False
+            logger.warning("[AuthManager] Login failed attempt %d — retrying…", attempt)
+            time.sleep(4)
 
-        except Exception as exc:
-            logger.exception("[AuthManager] DVWA login error: %s", exc)
-            return False
+        logger.error("[AuthManager] DVWA login failed after %d attempts", retries)
+        return False
 
     # ── Generic form login ────────────────────────────────────
 
@@ -222,20 +244,13 @@ class AuthManager:
         """
         Generic form-based login with automatic hidden-input capture.
 
-        Fetches the login page first to collect CSRF tokens / hidden
-        fields, merges them with ``credentials``, then POSTs.
-
         Parameters
         ----------
         login_url         : URL of the login endpoint
         credentials       : e.g. {"username": "admin", "password": "pass"}
         success_indicator : substring expected in the response body
                             when login succeeds (case-insensitive).
-                            Leave blank to use heuristic URL-change check.
-
-        Returns
-        -------
-        True if login appeared to succeed, False otherwise.
+                            Leave blank to use URL-change heuristic.
         """
         try:
             get_resp = self._session.get(login_url, timeout=12)
@@ -307,7 +322,7 @@ class AuthManager:
 # Factory helper
 # ─────────────────────────────────────────────────────────────
 
-def build_auth_manager(auth_config: Optional[Dict]) -> Optional[AuthManager]:
+def build_auth_manager(auth_config: Optional[Dict]) -> Optional["AuthManager"]:
     """
     Construct and configure an AuthManager from the API request auth block.
 
@@ -315,9 +330,9 @@ def build_auth_manager(auth_config: Optional[Dict]) -> Optional[AuthManager]:
     ---------------------------------
     { "type": "cookie",  "value": "PHPSESSID=abc; security=low" }
     { "type": "bearer",  "value": "eyJhbGci..." }
-    { "type": "basic",   "username": "admin",   "password": "pass" }
+    { "type": "basic",   "username": "admin", "password": "pass" }
     { "type": "dvwa",    "base_url": "http://dvwa:80",
-                         "username": "admin",   "password": "password",
+                         "username": "admin", "password": "password",
                          "security_level": "low" }
     { "type": "form",    "login_url": "http://...",
                          "credentials": {"user": "admin", "pass": "x"},

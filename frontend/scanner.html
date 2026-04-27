@@ -65,7 +65,7 @@
   <div class="container">
     <div class="row g-4">
 
-      <!-- Config column -->
+      <!-- ── Config column ───────────────────────────────────── -->
       <div class="col-lg-4">
         <div class="scanner-panel">
           <div class="panel-header">
@@ -79,7 +79,7 @@
           <div class="panel-body">
 
             <!-- Module tabs -->
-            <div class="scanner-tabs" id="moduleTabs" style="grid-template-columns:1fr 1fr 1fr">
+            <div class="scanner-tabs" style="grid-template-columns:1fr 1fr 1fr">
               <button class="tab-btn active" onclick="switchTab('crawl')">
                 <i class="bi bi-diagram-3"></i> Discovery
               </button>
@@ -91,11 +91,14 @@
               </button>
             </div>
 
-            <!-- Discovery config -->
+            <!-- ══════════════════════════════════════════════ -->
+            <!-- DISCOVERY CONFIG                              -->
+            <!-- ══════════════════════════════════════════════ -->
             <div id="crawl-config">
               <div class="mb-3">
                 <label class="cyber-label">Target URL</label>
-                <input type="url" id="crawl-url" class="cyber-input" placeholder="http://localhost:3000"/>
+                <input type="url" id="crawl-url" class="cyber-input"
+                       placeholder="http://localhost:3000"/>
               </div>
               <div class="row g-2 mb-3">
                 <div class="col-6">
@@ -107,16 +110,58 @@
                   <input type="number" id="crawl-maxurls" class="cyber-input" value="40" min="5" max="200"/>
                 </div>
               </div>
+
+              <!-- Auth toggle -->
+              <div class="mb-3">
+                <button class="btn-auth-toggle" id="crawl-auth-toggle"
+                        onclick="toggleAuth('crawl')">
+                  <span style="display:flex;align-items:center;gap:7px">
+                    <i class="bi bi-key-fill" style="color:var(--cyan-dim)"></i>
+                    Authentication (optional)
+                  </span>
+                  <i class="bi bi-chevron-down" id="crawl-auth-chevron"></i>
+                </button>
+
+                <!-- Auth panel — hidden by default -->
+                <div id="crawl-auth-section" class="hidden">
+                  <div class="auth-panel">
+                    <div class="mb-2">
+                      <label class="cyber-label">Auth Type</label>
+                      <select id="crawl-auth-type" class="cyber-input cyber-select"
+                              onchange="buildAuthFields('crawl')">
+                        <option value="none">None</option>
+                        <option value="cookie">Session Cookie</option>
+                        <option value="bearer">Bearer Token</option>
+                        <option value="basic">HTTP Basic</option>
+                        <option value="dvwa">DVWA Auto-Login</option>
+                        <option value="form">Generic Form Login</option>
+                      </select>
+                    </div>
+                    <!-- Dynamic fields injected here by buildAuthFields() -->
+                    <div id="crawl-auth-fields"></div>
+                    <!-- Pass / fail badge injected here by _setAuthBadge() -->
+                    <div id="crawl-auth-badge"></div>
+                    <button class="btn-auth-test" id="crawl-auth-test-btn"
+                            onclick="testAuth('crawl')">
+                      <i class="bi bi-shield-check me-1"></i> Test Auth
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               <button class="btn-cyber" id="crawl-btn" onclick="startCrawl()">
                 <i class="bi bi-play-fill"></i> Start Discovery
               </button>
-            </div>
+            </div><!-- /crawl-config -->
 
-            <!-- Injection config -->
+            <!-- ══════════════════════════════════════════════ -->
+            <!-- INJECTION CONFIG                              -->
+            <!-- ══════════════════════════════════════════════ -->
             <div id="payload-config" class="hidden">
               <div class="mb-3">
                 <label class="cyber-label">Target URL</label>
-                <input type="url" id="payload-url" class="cyber-input" placeholder="http://localhost:3000/page?id=1"/>
+                <input type="url" id="payload-url" class="cyber-input"
+                       placeholder="http://localhost:3000/page?id=1"/>
                 <div style="font-size:.7rem;color:var(--text-muted);font-family:var(--font-mono);margin-top:5px">
                   Include a query parameter, e.g. ?id=1
                 </div>
@@ -133,6 +178,42 @@
                 <label class="cyber-label">Max Tests</label>
                 <input type="number" id="payload-max" class="cyber-input" value="20" min="5" max="100"/>
               </div>
+
+              <!-- Auth toggle -->
+              <div class="mb-3">
+                <button class="btn-auth-toggle" id="payload-auth-toggle"
+                        onclick="toggleAuth('payload')">
+                  <span style="display:flex;align-items:center;gap:7px">
+                    <i class="bi bi-key-fill" style="color:var(--cyan-dim)"></i>
+                    Authentication (optional)
+                  </span>
+                  <i class="bi bi-chevron-down" id="payload-auth-chevron"></i>
+                </button>
+
+                <div id="payload-auth-section" class="hidden">
+                  <div class="auth-panel">
+                    <div class="mb-2">
+                      <label class="cyber-label">Auth Type</label>
+                      <select id="payload-auth-type" class="cyber-input cyber-select"
+                              onchange="buildAuthFields('payload')">
+                        <option value="none">None</option>
+                        <option value="cookie">Session Cookie</option>
+                        <option value="bearer">Bearer Token</option>
+                        <option value="basic">HTTP Basic</option>
+                        <option value="dvwa">DVWA Auto-Login</option>
+                        <option value="form">Generic Form Login</option>
+                      </select>
+                    </div>
+                    <div id="payload-auth-fields"></div>
+                    <div id="payload-auth-badge"></div>
+                    <button class="btn-auth-test" id="payload-auth-test-btn"
+                            onclick="testAuth('payload')">
+                      <i class="bi bi-shield-check me-1"></i> Test Auth
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               <button class="btn-cyber green" id="payload-btn" onclick="startPayload()">
                 <i class="bi bi-lightning-charge-fill"></i> Run Assessment
               </button>
@@ -140,13 +221,16 @@
                 <i class="bi bi-shield-exclamation me-1"></i>
                 Only assess applications you own or have written authorisation to test.
               </div>
-            </div>
+            </div><!-- /payload-config -->
 
-            <!-- Full Scan config -->
+            <!-- ══════════════════════════════════════════════ -->
+            <!-- FULL SCAN CONFIG                              -->
+            <!-- ══════════════════════════════════════════════ -->
             <div id="full-config" class="hidden">
               <div class="mb-3">
                 <label class="cyber-label">Target URL</label>
-                <input type="url" id="full-url" class="cyber-input" placeholder="http://localhost:3000"/>
+                <input type="url" id="full-url" class="cyber-input"
+                       placeholder="http://localhost:3000"/>
               </div>
               <div class="row g-2 mb-3">
                 <div class="col-6">
@@ -172,8 +256,44 @@
                   </select>
                 </div>
               </div>
+
+              <!-- Auth toggle -->
+              <div class="mb-3">
+                <button class="btn-auth-toggle" id="full-auth-toggle"
+                        onclick="toggleAuth('full')">
+                  <span style="display:flex;align-items:center;gap:7px">
+                    <i class="bi bi-key-fill" style="color:var(--cyan-dim)"></i>
+                    Authentication (optional)
+                  </span>
+                  <i class="bi bi-chevron-down" id="full-auth-chevron"></i>
+                </button>
+
+                <div id="full-auth-section" class="hidden">
+                  <div class="auth-panel">
+                    <div class="mb-2">
+                      <label class="cyber-label">Auth Type</label>
+                      <select id="full-auth-type" class="cyber-input cyber-select"
+                              onchange="buildAuthFields('full')">
+                        <option value="none">None</option>
+                        <option value="cookie">Session Cookie</option>
+                        <option value="bearer">Bearer Token</option>
+                        <option value="basic">HTTP Basic</option>
+                        <option value="dvwa">DVWA Auto-Login</option>
+                        <option value="form">Generic Form Login</option>
+                      </select>
+                    </div>
+                    <div id="full-auth-fields"></div>
+                    <div id="full-auth-badge"></div>
+                    <button class="btn-auth-test" id="full-auth-test-btn"
+                            onclick="testAuth('full')">
+                      <i class="bi bi-shield-check me-1"></i> Test Auth
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               <button class="btn-cyber" id="full-btn" onclick="startFullScan()"
-                style="background:linear-gradient(135deg,#8b5cf6,#6366f1)">
+                      style="background:linear-gradient(135deg,#8b5cf6,#6366f1)">
                 <i class="bi bi-shield-check"></i> Run Full Scan
               </button>
               <div class="warn-box mt-3">
@@ -181,10 +301,10 @@
                 Full scans may take several minutes. Only test applications
                 you own or have written authorisation to test.
               </div>
-            </div>
+            </div><!-- /full-config -->
 
-          </div>
-        </div>
+          </div><!-- /panel-body -->
+        </div><!-- /scanner-panel -->
 
         <!-- Tip card shown after crawl -->
         <div id="crawl-tip" class="tip-card hidden">
@@ -193,9 +313,9 @@
             individual URLs, or <strong style="color:#fff">Full Scan</strong> for a complete
             automated assessment with a downloadable report.</p>
         </div>
-      </div>
+      </div><!-- /col-lg-4 -->
 
-      <!-- Results column -->
+      <!-- ── Results column ──────────────────────────────────── -->
       <div class="col-lg-8">
         <div class="scanner-panel" style="min-height:520px">
           <div class="panel-header">
@@ -218,23 +338,24 @@
             <div id="status-bar" class="status-bar hidden mb-4"></div>
 
             <!--
-              BUG FIX: report-bar previously had inline style="display:flex" which overrides
-              the .hidden CSS class (inline styles have higher specificity than class rules).
-              Result: the bar was always visible on page load.
-              Fix: removed display:flex from inline style; visibility is now controlled
-              entirely via JavaScript (element.style.display = 'flex' / 'none').
+              Report bar: visibility controlled entirely by JS (style.display = 'flex' / 'none').
+              Do NOT use the .hidden CSS class here — inline display:none takes precedence
+              and avoids the specificity conflict that caused the bar to always be visible.
             -->
-            <div id="report-bar" class="mb-4" style="display:none;align-items:center;gap:10px;
-              padding:12px 16px;background:var(--surface);border:1px solid var(--border);
-              border-radius:9px;flex-wrap:wrap">
+            <div id="report-bar" class="mb-4"
+                 style="display:none;align-items:center;gap:10px;
+                        padding:12px 16px;background:var(--surface);
+                        border:1px solid var(--border);border-radius:9px;flex-wrap:wrap">
               <span style="font-size:.82rem;color:var(--text-dim);flex:1">
                 <i class="bi bi-file-earmark-text-fill me-2" style="color:var(--cyan)"></i>
                 Report ready — download below
               </span>
-              <button id="dl-html" class="btn-cyber" style="width:auto;padding:7px 16px;font-size:.8rem">
+              <button id="dl-html" class="btn-cyber"
+                      style="width:auto;padding:7px 16px;font-size:.8rem">
                 <i class="bi bi-filetype-html"></i> HTML Report
               </button>
-              <button id="dl-pdf" class="btn-cyber green" style="width:auto;padding:7px 16px;font-size:.8rem">
+              <button id="dl-pdf" class="btn-cyber green"
+                      style="width:auto;padding:7px 16px;font-size:.8rem">
                 <i class="bi bi-file-pdf-fill"></i> PDF Report
               </button>
             </div>
@@ -272,7 +393,7 @@
 
               <div id="full-risk-badge" class="mb-4"></div>
 
-              <!-- Clean message (hidden until confirmed no findings) -->
+              <!-- Clean message — shown when findings = 0 -->
               <div id="full-clean-msg" class="hidden" style="text-align:center;padding:40px 20px">
                 <div style="font-size:2.5rem;color:var(--green);margin-bottom:12px">&#10003;</div>
                 <p style="font-size:.9rem;color:var(--text-dim)">
@@ -282,10 +403,8 @@
               </div>
 
               <!--
-                BUG FIX: full-findings-section previously had no initial hidden class,
-                so the "Confirmed Findings" header was always visible even before results
-                loaded, causing a layout flash. Added hidden class — JS removes it when
-                findings are present.
+                hidden class present by default — JS removes it when findings exist.
+                Prevents the "Confirmed Findings" header flashing before results load.
               -->
               <div id="full-findings-section" class="hidden">
                 <div class="result-header mb-3">
@@ -302,14 +421,14 @@
                 </div>
                 <ul id="full-recs-list" style="list-style:none;padding:0"></ul>
               </div>
-            </div>
+            </div><!-- /full-results -->
 
-          </div>
-        </div>
-      </div>
+          </div><!-- /panel-body -->
+        </div><!-- /scanner-panel -->
+      </div><!-- /col-lg-8 -->
 
-    </div>
-  </div>
+    </div><!-- /row -->
+  </div><!-- /container -->
 </section>
 
 <!-- FOOTER -->
@@ -319,7 +438,10 @@
       <div class="col-lg-4">
         <a class="footer-brand" href="index.html">
           <div class="brand-icon"><i class="bi bi-shield-lock-fill"></i></div>
-          <div class="brand-text"><span class="brand-name">Aegis</span><span class="brand-sub">Security Platform</span></div>
+          <div class="brand-text">
+            <span class="brand-name">Aegis</span>
+            <span class="brand-sub">Security Platform</span>
+          </div>
         </a>
         <p class="footer-desc">Proactive web application security assessment — protecting your digital infrastructure.</p>
       </div>
