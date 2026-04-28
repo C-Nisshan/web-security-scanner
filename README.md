@@ -1,9 +1,26 @@
 # Aegis Security — Automated Web Application Security Scanner
 
-A Python-based educational tool that automatically crawls a web application, discovers input points, tests for common vulnerabilities (SQL Injection and Cross-Site Scripting), and generates a professional HTML or PDF assessment report with severity ratings and remediation guidance.
+A Python-based educational tool that automatically crawls a web application, discovers input points, tests for common vulnerabilities (SQL Injection and Cross-Site Scripting), and generates a professional HTML or PDF assessment report with severity ratings and AI-powered remediation guidance.
 
 > **Educational Project Notice**
 > This tool is intended for local use only against intentionally vulnerable practice applications such as OWASP Juice Shop and DVWA. It is not designed, intended, or supported for use against public websites, third-party services, or any system you do not own or have explicit written authorisation to test.
+
+---
+
+## What Changed in This Version
+
+| Area | Change | Why |
+|------|--------|-----|
+| **DVWA login** | Added dedicated `dvwa-db` MySQL service with health check in `docker-compose.yml` | DVWA's bundled database was not ready before the scanner tried to log in, causing silent failures |
+| **DVWA login** | `auth_manager.py` — `_dvwa_ensure_db()` now sleeps 3 s after setup POST; `login_dvwa()` retries up to 3 times | Handles the MySQL cold-start race condition |
+| **PDF report** | Completely rewritten `report_generator.py` — proper A4 geometry, full-page dark cover, 5-column metric grid, calibrated table columns, severity left-rules, per-page footer | Previous PDF had alignment issues and did not meet industry-standard documentation conventions |
+| **Recommendations** | New `scanner/ai_advisor.py` module — uses Google Gemini 1.5 Flash when `GEMINI_API_KEY` is set; falls back to enhanced rule-based advisor automatically | Produces context-aware, finding-specific recommendations instead of generic text |
+| **Configuration** | `.env.example` added; `GEMINI_API_KEY` read from environment / Docker secret | Keeps API keys out of source control |
+| **response_analyzer.py** | Delegates recommendation generation to `ai_advisor`; passes `scan_meta` for context | Required by the new advisor architecture |
+| **Dockerfile** | Fixed broken `CMD` (Markdown link artifact); added `HEALTHCHECK`; Playwright installs Chromium only | Prevented container from crashing on start |
+| **URL confusion** | This README now contains a comprehensive URL reference table and flow diagram | Most common support issue |
+| **Port conflict** | Frontend served on **8088** (not 8080 which is used by DVWA) | Eliminated port clash when running all services |
+| **Auth UI** | `scanner.html` updated — auth toggle panel added to all three tabs (Discovery, Injection, Full Scan) | Required DOM elements for `scanner.js` v3.1 auth functions |
 
 ---
 
@@ -12,9 +29,11 @@ A Python-based educational tool that automatically crawls a web application, dis
 - [Features](#features)
 - [Architecture](#architecture)
 - [Project Structure](#project-structure)
+- [Configuration](#configuration)
 - [Quick Start — Docker (Recommended)](#quick-start--docker-recommended)
-- [Manual Setup (Alternative)](#manual-setup-alternative)
-- [URL Reference — Docker vs Browser](#url-reference--docker-vs-browser)
+- [Manual Setup](#manual-setup)
+- [⚠ URL Reference — Critical Reading](#️-url-reference--critical-reading)
+- [Authentication Guide](#authentication-guide)
 - [Testing with Swagger UI](#testing-with-swagger-ui)
 - [Testing with the Frontend](#testing-with-the-frontend)
 - [API Reference](#api-reference)
@@ -33,8 +52,10 @@ A Python-based educational tool that automatically crawls a web application, dis
 | SQL Injection | Error-based, boolean-based, and time-based detection |
 | XSS Detection | Reflected XSS with context analysis (HTML body, attribute, script block) |
 | Response Analysis | Aggregates findings, assigns CVSS-inspired severity scores |
+| AI Advisor | Gemini 1.5 Flash generates context-aware recommendations (falls back to rule-based) |
 | HTML Report | Standalone, self-contained dark-themed report |
-| PDF Report | Professional PDF via ReportLab with cover page, findings, and remediation |
+| PDF Report | Industry-standard PDF with cover page, metric grid, findings table, recommendations |
+| Auth Manager | Cookie, Bearer, HTTP Basic, DVWA auto-login, generic form login |
 | REST API | Flask backend with Swagger UI for interactive testing |
 | Web UI | Full assessment console with Discovery, Injection, and Full Scan tabs |
 
@@ -43,26 +64,37 @@ A Python-based educational tool that automatically crawls a web application, dis
 ## Architecture
 
 ```
-User (Browser) ---> Frontend (HTML/CSS/JS)   ---> Swagger UI (/api/docs)
-                        |                              |
-                        v  REST API calls              |
-                   Flask app.py  <--------------------/
-                        |
-          .-------------+--------------.
-          v             v              v
-      Crawler    PayloadEngine   ScannerController
-                                      |
-                          .-----------+-----------.
-                          v           v           v
-                    SQLiDetector  XSSDetector   (future)
-                          |           |
-                          `------.----'
-                                 v
+Browser
+  │
+  ├── http://localhost:8088  →  Frontend (HTML/CSS/JS)
+  │                                │
+  │                                │  REST API calls to http://localhost:5000
+  │                                ▼
+  └── http://localhost:5000  →  aegis-backend (Flask)
+                                   │
+                     .─────────────┼──────────────.
+                     ▼             ▼               ▼
+                 Crawler    PayloadEngine    AuthManager
+                                   │
+                       .───────────┴──────────.
+                       ▼                      ▼
+               SQLiDetector            XSSDetector
+                       │                      │
+                       └──────────┬───────────┘
+                                  ▼
                          ResponseAnalyzer
-                                 |
-                                 v
+                                  │
+                                  ▼
+                             AIAdvisor ──► Gemini API (optional)
+                                  │
+                                  ▼
                          ReportGenerator
                           (HTML + PDF)
+
+Docker internal network:
+  aegis-backend ──► juice-shop:3000
+  aegis-backend ──► dvwa:80
+  dvwa          ──► dvwa-db:3306
 ```
 
 ---
@@ -71,106 +103,158 @@ User (Browser) ---> Frontend (HTML/CSS/JS)   ---> Swagger UI (/api/docs)
 
 ```
 web-security-scanner/
+│
+├── .env.example                  # ← copy to .env and add your Gemini key
+├── .env                          # ← YOU CREATE THIS (not committed to git)
+├── .gitignore
+├── README.md
+│
 ├── backend/
-│   ├── app.py                    # Flask REST API server + Swagger setup
+│   ├── app.py                    # Flask REST API server
 │   ├── swagger.py                # OpenAPI 3.0 specification
 │   ├── requirements.txt          # Python dependencies
 │   ├── Dockerfile                # Container image definition
-│   ├── docker-compose.yml        # Multi-container stack (backend + test targets)
+│   ├── docker-compose.yml        # Multi-container stack
 │   │
 │   ├── scanner/
 │   │   ├── __init__.py
+│   │   ├── ai_advisor.py         # Gemini / rule-based recommendations
+│   │   ├── auth_manager.py       # Authentication (cookie, bearer, DVWA, form)
 │   │   ├── crawler.py
 │   │   ├── payload_engine.py
 │   │   ├── sqli_detector.py
 │   │   ├── xss_detector.py
-│   │   ├── response_analyzer.py
-│   │   ├── report_generator.py
+│   │   ├── response_analyzer.py  # delegates to ai_advisor
+│   │   ├── report_generator.py   # PDF
 │   │   └── controller.py
 │   │
-│   └── reports/                  # Generated reports (auto-created)
+│   └── reports/                  # Generated reports (auto-created, volume-mounted)
 │
-├── frontend/
-│   ├── index.html
-│   ├── about.html
-│   ├── services.html
-│   ├── contact.html
-│   ├── scanner.html
-│   ├── css/
-│   └── js/
-│
-├── images/
-│   └── logo.svg
-│
-├── .gitignore
-└── README.md
+└── frontend/
+    ├── index.html
+    ├── about.html
+    ├── services.html
+    ├── contact.html
+    ├── scanner.html              # ← UPDATED: auth panels on all three tabs
+    │
+    ├── css/
+    │   ├── global.css            # Global shared styles
+    │   ├── index.css             # homepage-specific styles
+    │   ├── about.css             # about page styles
+    │   ├── services.css          # services page styles
+    │   ├── contact.css           # contact page styles
+    │   └── scanner.css           # Scanner UI styling
+    │
+    └── js/
+        ├── global.js             # Shared JS utilities (nav, helpers)
+        ├── app.js                # main app bootstrap / global logic
+        ├── contact.js            # contact form handling & validation
+        └── scanner.js            # v3.1 — auth, test-auth, scan phases
 ```
 
 ---
 
-## Quick Start -- Docker (Recommended)
+## Configuration
 
-Docker is the recommended way to run Aegis Security. It starts the backend, OWASP Juice Shop, and DVWA in a single command with no manual dependency installation required.
+### Step 1 — Create your `.env` file
+
+```bash
+cp .env.example .env
+```
+
+Open `.env` and set your values:
+
+```dotenv
+# Required for AI-powered recommendations (optional — rule-based if blank)
+GEMINI_API_KEY=your_key_here
+
+# Flask
+FLASK_ENV=production
+```
+
+### Step 2 — Get a Gemini API key (optional)
+
+1. Go to [Google AI Studio](https://aistudio.google.com/app/apikey).
+2. Click **Create API key**.
+3. Copy the key into `.env` as `GEMINI_API_KEY=`.
+
+When the key is present, every full scan will send the confirmed findings to Gemini 1.5 Flash and receive tailored, prioritised recommendations. If the key is absent or the API call fails, the scanner automatically falls back to its built-in rule-based advisor — no action required.
+
+### What the AI advisor does
+
+With `GEMINI_API_KEY` set, the advisor receives:
+- The target URL
+- Each confirmed finding (type, severity, affected parameter, affected URL)
+
+It returns 7–9 specific, prioritised recommendations written in a formal register suitable for a client report. Without the key, the built-in advisor returns structured recommendations based on the vulnerability types found (SQLi, XSS) plus general security hygiene guidance.
+
+---
+
+## Quick Start — Docker (Recommended)
+
+Docker is the recommended way to run Aegis. One command starts the backend, a MySQL database for DVWA, DVWA itself, and OWASP Juice Shop.
 
 ### Prerequisites
 
 - [Docker Desktop](https://www.docker.com/products/docker-desktop) installed and running
 - Git
 
-### Step 1 — Clone the repository
+### Step 1 — Clone
 
 ```bash
 git clone https://github.com/your-username/aegis-security.git
 cd aegis-security
 ```
 
-### Step 2 — Start all services
+### Step 2 — Configure environment
 
 ```bash
+cp .env.example .env
+# Edit .env — add GEMINI_API_KEY if you want AI recommendations
+```
+
+### Step 3 — Start all services
+
+```bash
+cd backend
 docker compose up --build
 ```
 
-This starts three containers:
+This starts four containers:
 
-| Container | Browser URL | Purpose |
-|-----------|-------------|---------|
-| `aegis-backend` | http://localhost:5000 | Aegis Flask API + Swagger UI |
-| `juice-shop` | http://localhost:3000 | OWASP Juice Shop (test target) |
-| `dvwa` | http://localhost:8080 | DVWA (test target) |
+| Container | Internal name | Browser URL | Purpose |
+|-----------|--------------|-------------|---------|
+| `aegis-backend` | `aegis-backend` | http://localhost:5000 | Aegis Flask API + Swagger UI |
+| `juice-shop` | `juice-shop` | http://localhost:3000 | OWASP Juice Shop (test target) |
+| `dvwa` | `dvwa` | http://localhost:8080 | DVWA PHP frontend |
+| `dvwa-db` | `dvwa-db` | *(internal only)* | DVWA MySQL database |
 
-### Step 3 — Verify the backend is running
+> **First run:** `dvwa-db` takes 15–30 seconds to initialise MySQL. The `dvwa` container waits for the health check to pass before starting. Wait until you see `aegis-backend` log `Running on http://0.0.0.0:5000` before proceeding.
+
+### Step 4 — Verify the backend
 
 ```bash
 curl http://localhost:5000/api/health
 ```
 
-Expected response:
+Expected:
 
 ```json
 {"status": "ok", "service": "Aegis Security Platform"}
 ```
 
-Open Swagger UI at: `http://localhost:5000/api/docs`
+### Step 5 — Serve the frontend
 
-### Step 4 — Serve the frontend
-
-In a separate terminal:
+Open a **second terminal**:
 
 ```bash
 cd frontend
-python -m http.server 8080
+python -m http.server 8088
 ```
 
-Then open `http://localhost:8080` in your browser and navigate to the Scanner page.
+> **Use port 8088**, not 8080 — DVWA already occupies 8080.
 
-### Step 5 — Run a test scan
-
-In the Scanner console, enter the Juice Shop URL and run a Full Scan:
-
-- **From the browser / Swagger UI (outside Docker):** use `http://localhost:3000`
-- **From the backend container (inside Docker):** use `http://juice-shop:3000`
-
-See the [URL Reference](#url-reference--docker-vs-browser) section for a full explanation.
+Open your browser at `http://localhost:8088`.
 
 ### Step 6 — Stop all containers
 
@@ -178,268 +262,194 @@ See the [URL Reference](#url-reference--docker-vs-browser) section for a full ex
 docker compose down
 ```
 
-Generated reports are saved to `./reports/` on your host machine via the Docker volume mount.
+To also remove the DVWA database volume (forces a fresh MySQL init next time):
+
+```bash
+docker compose down -v
+```
+
+Reports are saved to `./reports/` on your host via the Docker volume mount.
 
 ---
 
-## Manual Setup (Alternative)
+## Manual Setup
 
-Use this method if you prefer to run the backend directly on your machine without Docker.
+Use this if you prefer to run the backend outside Docker.
 
 ### Prerequisites
 
 - Python 3.10 or higher
 - pip
 
-### Step 1 — Clone the repository
+### Steps
 
 ```bash
+# 1. Clone
 git clone https://github.com/your-username/aegis-security.git
 cd aegis-security
-```
 
-### Step 2 — Create a virtual environment
-
-```bash
+# 2. Virtual environment
 python -m venv venv
+source venv/bin/activate   # Windows: venv\Scripts\activate
 
-# Linux / macOS
-source venv/bin/activate
+# 3. Dependencies
+pip install -r backend/requirements.txt
+pip install google-generativeai   # optional — for AI recommendations
+playwright install chromium
 
-# Windows
-venv\Scripts\activate
-```
+# 4. Environment
+cp .env.example .env
+# Edit .env
 
-### Step 3 — Install dependencies
+# 5. Start test targets (Docker still required for these)
+docker run -d -p 3000:3000 bkimminich/juice-shop
+docker run -d -p 8080:80 vulnerables/web-dvwa
 
-```bash
-pip install -r requirements.txt
-playwright install
-```
-
-### Step 4 — Start the backend
-
-```bash
+# 6. Start backend
+cd backend
 python app.py
-```
+# API now at http://127.0.0.1:5000
 
-The API server starts at `http://127.0.0.1:5000`.
-
-### Step 5 — Start the test targets (optional but recommended)
-
-You still need Docker for the vulnerable test applications:
-
-```bash
-docker run -p 3000:3000 bkimminich/juice-shop
-docker run -p 8080:80 vulnerables/web-dvwa
-```
-
-### Step 6 — Serve the frontend
-
-In a separate terminal:
-
-```bash
+# 7. Serve frontend (separate terminal)
 cd frontend
-python -m http.server 8080
+python -m http.server 8088
+# Open http://localhost:8088
 ```
-
-Then open `http://localhost:8080`.
 
 ---
 
-## URL Reference -- Docker vs Browser
+## ⚠ URL Reference — Critical Reading
 
-This is the most common source of confusion when running Aegis with Docker.
+This is the most common source of confusion. Read this section before you run your first scan.
 
-Docker containers communicate with each other using **service names** defined in `docker-compose.yml`, not `localhost`. Your browser, however, always uses `localhost` to reach ports forwarded to your host machine.
+### The fundamental rule
 
-| Where you are typing the URL | Correct URL to use |
-|------------------------------|--------------------|
-| Browser (Scanner page, Swagger UI) | `http://localhost:3000` |
-| Backend container scanning Juice Shop | `http://juice-shop:3000` |
-| Browser scanning DVWA | `http://localhost:8080` |
-| Backend container scanning DVWA | `http://dvwa:80` |
+**The Aegis backend container performs the actual crawling and scanning — not your browser.**
 
-**Practical rule:**
+When you type a target URL into the Scanner UI, your browser sends it to the backend API (`localhost:5000`). The backend then uses that URL to make HTTP requests. Because the backend is a Docker container, it lives inside the Docker network. It cannot reach `localhost` on your host machine — it can only reach other containers by their **Docker service names**.
 
-- If you are entering a URL into your **browser** or the **Scanner web UI**, use `localhost`.
-- If you are sending a scan request directly to the Aegis API (e.g. via curl from your terminal or Swagger UI), and the scan target is also running in Docker, use the **Docker service name**.
+```
+Your browser                    Docker network
+     │                               │
+     │  POST /api/scan/full          │
+     │  { "target_url": "..." }      │
+     │─────────────────────────────► │
+     │                          aegis-backend
+     │                               │
+     │                               │ scans this URL ─────► juice-shop:3000
+     │                               │                        dvwa:80
+```
 
-When you use the Scanner web UI in your browser, the frontend sends the target URL to the Aegis backend, which then performs the actual scan. The backend runs inside Docker, so it must use the Docker service name to reach other containers.
+### URL cheat sheet
 
-**Example:**
+| Where you are typing | What you want to reach | URL to use |
+|---------------------|----------------------|------------|
+| Browser address bar (manual access) | Aegis backend API | `http://localhost:5000` |
+| Browser address bar (manual access) | Swagger UI | `http://localhost:5000/api/docs` |
+| Browser address bar (manual access) | Scanner frontend | `http://localhost:8088` |
+| Browser address bar (manual access) | DVWA for manual login | `http://localhost:8080` |
+| Browser address bar (manual access) | Juice Shop for manual use | `http://localhost:3000` |
+| **Scanner UI — Target URL field** | **Scan Juice Shop** | **`http://juice-shop:3000`** |
+| **Scanner UI — Target URL field** | **Scan DVWA** | **`http://dvwa:80`** |
+| **Auth panel — DVWA Base URL** | **DVWA auto-login** | **`http://dvwa:80`** |
+| Swagger UI — `target_url` field | Scan Juice Shop | `http://juice-shop:3000` |
+| Swagger UI — `target_url` field | Scan DVWA | `http://dvwa:80` |
+| `curl` from your terminal | Aegis health check | `http://localhost:5000/api/health` |
 
-You want to scan Juice Shop using the web UI. Enter `http://localhost:3000` in the Scanner URL field. The browser cannot use `juice-shop:3000`, but the Aegis backend (which is inside Docker) can reach Juice Shop at `http://juice-shop:3000` internally.
+### Why can't I use localhost in the Scanner UI?
 
-To scan Juice Shop entirely within Docker (e.g. via the API directly), use `http://juice-shop:3000` as the target URL.
+The Scanner UI runs in your browser. When you click "Run Full Scan", the browser sends a `POST` request to `http://localhost:5000/api/scan/full`. The backend receives this request and uses the `target_url` value to crawl. From inside the Docker container, `localhost` refers to the container itself — not your host machine and not other containers. The only way to reach Juice Shop or DVWA from inside the backend container is via their Docker service names (`juice-shop`, `dvwa`).
+
+### When running backend manually (outside Docker)
+
+If you ran the backend with `python app.py` instead of Docker Compose, the backend runs on your host machine. In that case you **can** use `localhost`:
+
+| Target | URL to use |
+|--------|-----------|
+| Juice Shop | `http://localhost:3000` |
+| DVWA | `http://localhost:8080` |
+
+---
+
+## Authentication Guide
+
+The Scanner UI provides an Authentication panel on every tab (Discovery, Injection, Full Scan). Click **Authentication (optional)** to expand it.
+
+### Auth types
+
+| Type | Use case | Key fields |
+|------|----------|------------|
+| **None** | Unauthenticated scan | — |
+| **Session Cookie** | You logged in manually via browser | Paste cookie string from DevTools → Application → Cookies |
+| **Bearer Token** | JWT or API token | Paste token (without `Bearer ` prefix) |
+| **HTTP Basic** | HTTP Basic Auth | Username + password |
+| **DVWA Auto-Login** | Automated DVWA login | Base URL: `http://dvwa:80` · Username: `admin` · Password: `password` |
+| **Generic Form Login** | Any form-based login | Login URL, field names, credentials |
+
+### DVWA auto-login workflow
+
+1. Open the **Full Scan** tab.
+2. Set **Target URL** to `http://dvwa:80`.
+3. Open **Authentication (optional)**.
+4. Select **DVWA Auto-Login**.
+5. Set **DVWA Base URL** to `http://dvwa:80` (not `localhost:8080`).
+6. Click **Test Auth** — wait for the green badge: `Authentication succeeded — dvwa_form`.
+7. Click **Run Full Scan**.
+
+> If Test Auth fails with "still showing the login/setup page", the DVWA container may still be starting. Wait 30 seconds and try again.
+
+### Session cookie workflow (manual login)
+
+1. Open `http://localhost:8080` in your browser and log in to DVWA.
+2. Open DevTools (F12) → Application → Cookies → `http://localhost:8080`.
+3. Copy the value of `PHPSESSID`. Also copy `security` (usually `low`).
+4. In the Scanner UI, select **Session Cookie** and paste:
+   ```
+   PHPSESSID=abc123; security=low
+   ```
+5. Set the target URL to `http://dvwa:80` and run your scan.
 
 ---
 
 ## Testing with Swagger UI
 
-Swagger UI provides a full interactive API console in the browser with no additional tooling required.
-
-### Step 1 — Start the backend
-
-```bash
-# Docker
-docker compose up --build
-
-# Manual
-python app.py
-```
-
-### Step 2 — Open Swagger UI
+### Open Swagger UI
 
 ```
 http://localhost:5000/api/docs
 ```
 
-### Step 3 — Health check
+### Health check
 
-1. Expand `GET /api/health`.
-2. Click `Try it out` then `Execute`.
-3. Confirm the response shows `"status": "ok"`.
+1. Expand `GET /api/health` → Try it out → Execute.
+2. Confirm `"status": "ok"`.
 
-### Step 4 — Surface discovery scan
+### Auth test (new in v3.1)
 
-1. Expand `POST /api/scan/crawl` and click `Try it out`.
-2. Enter a target URL. If running in Docker and scanning Juice Shop from within the container network, use `http://juice-shop:3000`. If scanning via the browser/Swagger UI, use `http://localhost:3000`.
+Before scanning, verify your credentials:
+
+1. Expand `POST /api/auth/test` → Try it out.
+2. Enter:
 
 ```json
 {
-  "target_url": "http://localhost:3000",
-  "max_depth": 2,
-  "max_urls": 40
+  "auth": {
+    "type": "dvwa",
+    "base_url": "http://dvwa:80",
+    "username": "admin",
+    "password": "password",
+    "security_level": "low"
+  }
 }
 ```
 
-3. Click `Execute` and inspect the `visited_urls` array in the response.
+3. A `"success": true` response with a `PHPSESSID` cookie confirms DVWA login is working.
 
-### Step 5 — Full pipeline scan
-
-1. Expand `POST /api/scan/full` and click `Try it out`.
+### Full pipeline scan
 
 ```json
 {
-  "target_url": "http://localhost:3000",
-  "max_depth": 2,
-  "max_urls": 40,
-  "max_targets": 10,
-  "max_payloads": 20,
-  "payload_type": "both"
-}
-```
-
-2. Click `Execute`. Note the `scan_id` returned in the response (for example, `"a1b2c3d4"`).
-
-### Step 6 — Download the report
-
-1. Expand `GET /api/report/{scan_id}/html`.
-2. Click `Try it out`, enter your `scan_id`, and click `Execute`.
-3. Click the `Download file` link in the response to save the report.
-
-The raw OpenAPI JSON specification is available at `http://localhost:5000/api/swagger.json` for import into Postman or Insomnia.
-
----
-
-## Testing with the Frontend
-
-The frontend is a static HTML/CSS/JS application that communicates with the Flask backend over the REST API.
-
-### Step 1 — Ensure the backend is running
-
-```bash
-# Docker (recommended)
-docker compose up --build
-
-# Manual
-python app.py
-```
-
-### Step 2 — Serve the frontend
-
-```bash
-cd frontend
-python -m http.server 8080
-```
-
-Open `http://localhost:8080` in your browser.
-
-### Step 3 — Use the Assessment Console
-
-Navigate to the Scanner page (`http://localhost:8080/scanner.html`). The console has three tabs:
-
-| Tab | What it does |
-|-----|--------------|
-| Discovery | Runs the crawler and lists every page found |
-| Injection | Tests a single URL with SQLi and XSS payloads |
-| Full Scan | Runs the complete pipeline and generates a downloadable report |
-
-### Recommended workflow
-
-1. In the **Discovery** tab, enter your target URL and click `Start Discovery`.
-
-   - Always use `http://localhost:3000` (or `http://localhost:8080` for DVWA) when typing into the browser-based UI.
-   - Do not use Docker service names (`juice-shop:3000`) in the browser — these are only valid inside the Docker network.
-
-2. After the crawl completes, the target URL is automatically pre-filled in the other tabs. Switch to **Full Scan**.
-
-3. Click `Run Full Scan` and wait for the pipeline to complete.
-
-4. Use the `HTML Report` and `PDF Report` buttons to download your findings.
-
----
-
-## API Reference
-
-### `GET /api/health`
-
-Health check. Returns service status.
-
----
-
-### `POST /api/scan/crawl`
-
-Surface discovery only. Crawls the target and returns all reachable pages.
-
-**Request body:**
-
-```json
-{
-  "target_url": "http://localhost:3000",
-  "max_depth":  2,
-  "max_urls":   40
-}
-```
-
----
-
-### `POST /api/scan/payload`
-
-Injection assessment against a single URL. Tests the specified URL with SQLi and/or XSS payloads.
-
-**Request body:**
-
-```json
-{
-  "target_url":   "http://localhost:3000/page?id=1",
-  "payload_type": "both",
-  "max_payloads": 20
-}
-```
-
----
-
-### `POST /api/scan/full`
-
-Full pipeline: crawl, inject, analyse, and generate report.
-
-**Request body:**
-
-```json
-{
-  "target_url":   "http://localhost:3000",
+  "target_url":   "http://juice-shop:3000",
   "max_depth":    2,
   "max_urls":     40,
   "max_targets":  10,
@@ -448,15 +458,116 @@ Full pipeline: crawl, inject, analyse, and generate report.
 }
 ```
 
+Note the `scan_id` in the response, then download the report:
+
+- `GET /api/report/{scan_id}/html`
+- `GET /api/report/{scan_id}/pdf`
+
+The raw OpenAPI spec is at `http://localhost:5000/api/swagger.json` for import into Postman or Insomnia.
+
 ---
+
+## Testing with the Frontend
+
+### Recommended workflow
+
+1. Open `http://localhost:8088/scanner.html`.
+2. Select the **Discovery** tab.
+3. Enter the target URL — **use `http://juice-shop:3000`** (Docker service name).
+4. Optionally expand **Authentication (optional)** and configure credentials.
+5. Click **Test Auth** if using authentication, and confirm the green badge.
+6. Click **Start Discovery**. The URL is auto-filled in the other tabs on success.
+7. Switch to **Full Scan** and click **Run Full Scan**.
+8. Download the HTML or PDF report when the scan completes.
+
+### Port reference for the frontend
+
+| Scan target | Enter this in Target URL |
+|-------------|------------------------|
+| OWASP Juice Shop | `http://juice-shop:3000` |
+| DVWA | `http://dvwa:80` |
+
+---
+
+## API Reference
+
+### `GET /api/health`
+
+Health check.
+
+### `POST /api/auth/test`
+
+Validate authentication credentials without running a scan. Returns `"success": true/false` with cookie names and a detail message.
+
+**Request:**
+
+```json
+{
+  "auth": {
+    "type": "dvwa",
+    "base_url": "http://dvwa:80",
+    "username": "admin",
+    "password": "password",
+    "security_level": "low"
+  }
+}
+```
+
+### `POST /api/scan/crawl`
+
+Surface discovery only.
+
+```json
+{
+  "target_url": "http://juice-shop:3000",
+  "max_depth": 2,
+  "max_urls": 40,
+  "auth": { "type": "none" }
+}
+```
+
+### `POST /api/scan/payload`
+
+Injection assessment on a single URL.
+
+```json
+{
+  "target_url":   "http://dvwa:80/vulnerabilities/sqli/?id=1&Submit=Submit",
+  "payload_type": "both",
+  "max_payloads": 20,
+  "auth": {
+    "type": "dvwa",
+    "base_url": "http://dvwa:80",
+    "username": "admin",
+    "password": "password",
+    "security_level": "low"
+  }
+}
+```
+
+### `POST /api/scan/full`
+
+Full pipeline: crawl → inject → analyse → report.
+
+```json
+{
+  "target_url":   "http://juice-shop:3000",
+  "max_depth":    2,
+  "max_urls":     40,
+  "max_targets":  10,
+  "max_payloads": 20,
+  "payload_type": "both",
+  "auth": { "type": "none" }
+}
+```
 
 ### `GET /api/report/<scan_id>/html`
 
-Download the standalone HTML report for a completed scan.
+Download the HTML report.
 
 ### `GET /api/report/<scan_id>/pdf`
 
-Download the PDF report. Requires `reportlab` to be installed.
+Download the PDF report.
 
 ### `GET /api/report/<scan_id>/summary`
 
@@ -464,7 +575,7 @@ JSON summary of a completed scan.
 
 ### `GET /api/docs`
 
-Swagger UI — interactive API documentation and testing console.
+Swagger UI.
 
 ### `GET /api/swagger.json`
 
@@ -481,11 +592,11 @@ Raw OpenAPI 3.0 specification.
 | `sqli_detector.py` | Processing | Error-based, boolean-based, and time-based SQL injection detection |
 | `xss_detector.py` | Processing | Context-aware reflected XSS detection across HTML body, attribute, and script contexts |
 | `response_analyzer.py` | Analysis | Aggregates findings, assigns CVSS-inspired severity scores, adds OWASP references |
-| `report_generator.py` | Reporting | Generates standalone HTML and PDF reports via ReportLab |
-| `controller.py` | Orchestration | Runs the four-stage pipeline (crawl, extract, inject, analyse, report) |
-| `app.py` | API | Flask REST server, route definitions, Swagger UI registration |
-
-For implementation details, refer to the docstrings at the top of each source file.
+| `ai_advisor.py` | Analysis | Gemini 1.5 Flash recommendations (rule-based fallback) |
+| `auth_manager.py` | Infrastructure | Session management for cookie, bearer, basic, DVWA, and form auth |
+| `report_generator.py` | Reporting | Industry-standard HTML and PDF reports |
+| `controller.py` | Orchestration | Runs the four-stage pipeline (crawl → inject → analyse → report) |
+| `app.py` | API | Flask REST server, route definitions, Swagger UI |
 
 ---
 
@@ -493,13 +604,10 @@ For implementation details, refer to the docstrings at the top of each source fi
 
 Only scan intentionally vulnerable applications that exist for practice and education.
 
-| Application | Docker command | Browser URL |
-|-------------|---------------|-------------|
-| [OWASP Juice Shop](https://github.com/juice-shop/juice-shop) | `docker run -p 3000:3000 bkimminich/juice-shop` | `http://localhost:3000` |
-| [DVWA](https://github.com/digininja/DVWA) | `docker run -p 8080:80 vulnerables/web-dvwa` | `http://localhost:8080` |
-| [WebGoat](https://github.com/WebGoat/WebGoat) | `docker run -p 8081:8080 webgoat/goat-and-wolf` | `http://localhost:8081` |
-
-All three are also available by running `docker compose up` from this repository.
+| Application | Docker service name | Browser URL | Scan URL (from backend) |
+|-------------|-------------------|-------------|------------------------|
+| [OWASP Juice Shop](https://github.com/juice-shop/juice-shop) | `juice-shop` | `http://localhost:3000` | `http://juice-shop:3000` |
+| [DVWA](https://github.com/digininja/DVWA) | `dvwa` | `http://localhost:8080` | `http://dvwa:80` |
 
 ---
 
@@ -507,28 +615,27 @@ All three are also available by running `docker compose up` from this repository
 
 Only run scans against applications you own or have explicit written authorisation to test.
 
-This tool is built for educational use in controlled, local environments. The following design decisions reflect that intent:
-
-- All payloads are safe, non-destructive, read-only test strings. No DDL or DML mutations are used.
-- The crawler uses a polite request delay (0.3 seconds by default) to avoid overwhelming a target.
-- The Scanner UI displays a warning before each injection scan reminding users to verify authorisation.
+- All payloads are safe, non-destructive, read-only test strings.
+- The crawler uses a polite request delay (0.3 s) to avoid overwhelming a target.
+- The Scanner UI displays a warning before each injection scan.
 - The User-Agent header identifies the tool: `AegisSecurity/1.0 Web Application Assessment`.
-- No scan data is transmitted to external services. Everything runs locally.
+- No scan data is transmitted to external services except (optionally) the list of finding types sent to the Gemini API for recommendation generation — no URLs, no evidence strings, no personal data.
 
-Scanning public websites, production systems, or any system without written permission is illegal in most jurisdictions and is not a supported use case for this tool.
+Scanning public websites, production systems, or any system without written permission is illegal in most jurisdictions.
 
 ---
 
 ## Roadmap
 
+- [x] Authentication support (cookie, bearer, basic, DVWA, form)
+- [x] AI-powered recommendations via Gemini
+- [x] Industry-standard PDF report
 - [ ] Header and cookie injection support
 - [ ] Stored XSS detection
 - [ ] CSRF detection
-- [ ] Authentication support (session cookie / Bearer token)
 - [ ] Scan history with SQLite persistence
 - [ ] Scheduled scans via APScheduler
 - [ ] CI/CD CLI entry point
-- [ ] Selenium mode for JavaScript-rendered SPAs
 
 ---
 
@@ -538,4 +645,4 @@ MIT — see `LICENSE` for details.
 
 ---
 
-*Aegis Security Platform — Educational Web Application Security Scanner*
+*Aegis Security Platform — Web Application Security Scanner*
