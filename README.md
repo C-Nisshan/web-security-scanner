@@ -18,8 +18,8 @@ If Docker is not available, see [Manual Setup](#manual-setup) at the end of this
 ## 1. Environment Setup
 
 ```bash
-git clone https://github.com/your-username/aegis-security.git
-cd aegis-security
+git clone https://github.com/C-Nisshan/web-security-scanner.git
+cd web-security-scanner
 cp .env.example .env
 ```
 
