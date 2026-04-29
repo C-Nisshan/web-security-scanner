@@ -79,6 +79,11 @@ Open a **second terminal**:
 cd frontend
 python -m http.server 8088
 ```
+If this command does not work, try this:
+
+```
+python3 -m http.server 8088
+```
 
 Open your browser at **`http://localhost:8088`**.
 
